@@ -1,4 +1,4 @@
-#include "InstructionGraphAnalysis.h"
+#include "DependencyGraphAnalysis.h"
 
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
@@ -9,10 +9,29 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
+#include <string>
 
 using namespace llvm;
 
 namespace {
+
+std::string getFunctionHeader(const Function &F) {
+  std::string IR;
+  raw_string_ostream OS(IR);
+  F.print(OS);
+  OS.flush();
+
+  // Function::print emits the body-opening brace on its own line after the
+  // signature. Aggregate types in the signature have inline braces, so this
+  // delimiter identifies the start of the body.
+  size_t BodyStart = IR.find("{\n");
+  if (BodyStart == std::string::npos)
+    BodyStart = IR.find("{\r\n");
+  if (BodyStart == std::string::npos)
+    return F.getName().str();
+
+  return IR.substr(0, BodyStart + 1);
+}
 
 class DepVecPass : public PassInfoMixin<DepVecPass> {
 public:
@@ -25,31 +44,43 @@ public:
       if (F.isDeclaration())
         continue;
 
-      errs() << "function " << F.getName() << '\n';
-      auto &Graph = FAM.getResult<depvec::InstructionGraphAnalysis>(F);
+      errs() << "dependency graph for function " << F.getName() << '\n';
+      auto &Graph = FAM.getResult<depvec::DependencyGraphAnalysis>(F);
 
-      for (unsigned Id = 0; Id < Graph.nodes.size(); ++Id)
-        errs() << "  n" << Id << ": " << *Graph.nodes[Id] << '\n';
-
-      errs() << "  dependency edges:\n";
-      for (const auto &Edge : Graph.dependencyEdges) {
-        errs() << "    {";
-        for (unsigned I = 0; I < Edge.sources.size(); ++I) {
-          if (I)
-            errs() << ", ";
-          errs() << "n" << Edge.sources[I];
-        }
-        errs() << "} -[";
-        switch (Edge.flavour) {
-        case depvec::InstructionGraphAnalysis::DependencyEdgeFlavour::Data:
-          errs() << "Data";
+      for (unsigned Id = 0; Id < Graph.nodes.size(); ++Id) {
+        const auto &Node = Graph.nodes[Id];
+        errs() << "  n" << Id << ": ";
+        switch (Node.kind) {
+        case depvec::DependencyGraph::Node::Kind::Init:
+          errs() << "init: " << getFunctionHeader(F);
+          break;
+        case depvec::DependencyGraph::Node::Kind::Instruction:
+          errs() << *Node.instruction;
+          break;
+        case depvec::DependencyGraph::Node::Kind::Exit:
+          errs() << "exit (" << *Node.instruction << ')';
           break;
         }
-        errs() << "]-> n" << Edge.target;
-        if (Edge.flavour ==
-            depvec::InstructionGraphAnalysis::DependencyEdgeFlavour::Data)
-          errs() << " (" << Edge.value << ')';
         errs() << '\n';
+      }
+
+      errs() << "  dependency edges:\n";
+      for (const auto &Edge : Graph.edges) {
+        errs() << "    {";
+        bool FirstSource = true;
+        for (unsigned Source : Edge.sources) {
+          errs() << (FirstSource ? " " : ", ") << "n" << Source;
+          FirstSource = false;
+        }
+        if (!FirstSource)
+          errs() << " ";
+        errs() << "} -" << Edge.label << "(";
+        bool FirstValue = true;
+        for (const std::string &Value : Edge.values) {
+          errs() << (FirstValue ? "" : ", ") << Value;
+          FirstValue = false;
+        }
+        errs() << ")-> n" << Edge.target << '\n';
       }
     }
 
@@ -66,7 +97,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK PassPluginLibraryInfo llvmGetPassPluginInfo() {
         PB.registerAnalysisRegistrationCallback(
             [](FunctionAnalysisManager &FAM) {
               FAM.registerPass(
-                  [] { return depvec::InstructionGraphAnalysis(); });
+                  [] { return depvec::DependencyGraphAnalysis(); });
             });
 
             // Permit explicit use with: opt -passes=depvec
