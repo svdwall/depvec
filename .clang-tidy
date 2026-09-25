@@ -1,0 +1,7 @@
+Checks: >-
+  -*,
+  clang-analyzer-*,-clang-analyzer-security.ArrayBound,
+  bugprone-*,
+  performance-*,-performance-enum-size
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/src/.*'

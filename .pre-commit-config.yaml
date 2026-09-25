@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: clang-tidy
+        name: clang-tidy
+        entry: >-
+          sh -c 'exec clang-tidy --quiet -p build
+          --extra-arg-before="-isystem${DEPVEC_CXX_INCLUDE}" "$@"' --
+        language: system
+        types: [c++]
+        files: ^src/.*\.cpp$
+      - id: clang-tidy-examples
+        name: clang-tidy examples
+        entry: >-
+          sh -c 'exec clang-tidy --quiet
+          --checks=-bugprone-easily-swappable-parameters
+          --extra-arg-before=-xc --extra-arg-before=-std=c11
+          --extra-arg-before=-Iexamples "$@" --' --
+        language: system
+        types: [c]
+        files: ^examples/.*\.c$

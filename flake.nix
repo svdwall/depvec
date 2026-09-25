@@ -25,12 +25,15 @@
         cmake
         ninja
         llvmPackages_22.clang
+        llvmPackages_22.clang-tools
         llvmPackages_22.libllvm
+        pre-commit
         codex
       ];
 
       shellHook = ''
         export CLANGD_FLAGS="--query-driver=$(command -v clang++)"
+        export DEPVEC_CXX_INCLUDE="${llvmPackages_22.libcxx.dev}/include/c++/v1"
       '';
     };
   });
