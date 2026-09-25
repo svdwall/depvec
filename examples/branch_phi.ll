@@ -5,9 +5,12 @@ target triple = "arm64-apple-macosx14.0.0"
 
 @left_marker = global i32 0, align 4
 @right_marker = global i32 0, align 4
+@.str = private unnamed_addr constant [7 x i8] c"depvec\00", section "llvm.metadata"
+@.str.1 = private unnamed_addr constant [22 x i8] c"examples/branch_phi.c\00", section "llvm.metadata"
+@llvm.global.annotations = appending global [1 x { ptr, ptr, ptr, i32, ptr }] [{ ptr, ptr, ptr, i32, ptr } { ptr @branch_phi, ptr @.str, ptr @.str.1, i32 6, ptr null }], section "llvm.metadata"
 
 ; Function Attrs: mustprogress nofree norecurse nounwind sspstrong willreturn memory(readwrite, argmem: none, target_mem0: none, target_mem1: none) uwtable(sync)
-define noundef i32 @branch_phi(i32 noundef %condition, i32 noundef %left, i32 noundef %right) local_unnamed_addr #0 {
+define noundef i32 @branch_phi(i32 noundef %condition, i32 noundef %left, i32 noundef %right) #0 {
 entry:
   %tobool.not = icmp eq i32 %condition, 0
   br i1 %tobool.not, label %if.else, label %if.then

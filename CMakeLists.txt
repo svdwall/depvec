@@ -9,6 +9,7 @@ add_llvm_pass_plugin(DepVecPass
   src/DepVecPass.cpp
   src/DependencyGraphAnalysis.cpp
   src/DataDependencyAnalysis.cpp
+  src/MemoryOrderAnalysis.cpp
 )
 foreach(LLVM_INCLUDE_DIR IN LISTS LLVM_INCLUDE_DIRS)
   target_compile_options(DepVecPass PRIVATE "-isystem${LLVM_INCLUDE_DIR}")

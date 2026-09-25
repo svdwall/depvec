@@ -64,7 +64,7 @@ DataDependencyAnalysis::run(const DependencyGraph &Graph) {
     DependencyGraph::DependencyEdge &DataEdge = It->second;
     if (Inserted) {
       DataEdge.target = Edge.target;
-      DataEdge.label = "data";
+      DataEdge.kind = "data";
     }
     DataEdge.sources.insert(Edge.source);
     DataEdge.values.insert(Edge.value);

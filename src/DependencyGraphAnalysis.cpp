@@ -1,7 +1,9 @@
 #include "DependencyGraphAnalysis.h"
 
 #include "DataDependencyAnalysis.h"
+#include "MemoryOrderAnalysis.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -21,7 +23,7 @@ unsigned DependencyGraph::getNodeId(const llvm::Instruction *I) const {
 
 DependencyGraphAnalysis::Result
 DependencyGraphAnalysis::run(llvm::Function &F,
-                             llvm::FunctionAnalysisManager &) {
+                             llvm::FunctionAnalysisManager &FAM) {
   DependencyGraph Graph;
   Graph.function = &F;
 
@@ -48,7 +50,14 @@ DependencyGraphAnalysis::run(llvm::Function &F,
                                          "instruction in function '") +
                              F.getName() + "'");
 
-  Graph.edges = DataDependencyAnalysis::run(Graph);
+  const llvm::DominatorTree &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(F);
+  Graph.edges = std::vector<DependencyGraph::DependencyEdge>();
+  std::vector<DependencyGraph::DependencyEdge> DataEdges =
+      DataDependencyAnalysis::run(Graph);
+  Graph.edges.insert(Graph.edges.end(), DataEdges.begin(), DataEdges.end());
+  std::vector<DependencyGraph::DependencyEdge> MemoryEdges =
+      MemoryOrderAnalysis::run(Graph, DT);
+  Graph.edges.insert(Graph.edges.end(), MemoryEdges.begin(), MemoryEdges.end());
   return Graph;
 }
 

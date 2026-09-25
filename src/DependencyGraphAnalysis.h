@@ -25,9 +25,9 @@ struct DependencyGraph {
   struct DependencyEdge {
     std::set<unsigned> sources;
     unsigned target;
-    // The dependency kind is "data"; values name the SSA registers carried
-    // by this edge (for example, {n0, n1} -data(%x, %y)-> n3).
-    std::string label;
+    // The dependency kind identifies the edge type. Data edges also carry SSA
+    // register names in values; memory edges leave values empty.
+    std::string kind;
     std::set<std::string> values;
   };
 

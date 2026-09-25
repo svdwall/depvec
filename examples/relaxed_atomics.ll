@@ -1,21 +1,22 @@
-; ModuleID = 'examples/def_use_independent.c'
-source_filename = "examples/def_use_independent.c"
+; ModuleID = 'examples/relaxed_atomics.c'
+source_filename = "examples/relaxed_atomics.c"
 target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
 target triple = "arm64-apple-macosx14.0.0"
 
-@independent_sink = global i32 0, align 4
+@x = global i32 0, align 4
+@y = global i32 0, align 4
+@z = local_unnamed_addr global i32 0, align 4
 @.str = private unnamed_addr constant [7 x i8] c"depvec\00", section "llvm.metadata"
-@.str.1 = private unnamed_addr constant [31 x i8] c"examples/def_use_independent.c\00", section "llvm.metadata"
-@llvm.global.annotations = appending global [1 x { ptr, ptr, ptr, i32, ptr }] [{ ptr, ptr, ptr, i32, ptr } { ptr @def_use_independent, ptr @.str, ptr @.str.1, i32 5, ptr null }], section "llvm.metadata"
+@.str.1 = private unnamed_addr constant [27 x i8] c"examples/relaxed_atomics.c\00", section "llvm.metadata"
+@llvm.global.annotations = appending global [1 x { ptr, ptr, ptr, i32, ptr }] [{ ptr, ptr, ptr, i32, ptr } { ptr @example, ptr @.str, ptr @.str.1, i32 8, ptr null }], section "llvm.metadata"
 
 ; Function Attrs: nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, target_mem0: none, target_mem1: none) uwtable(sync)
-define range(i32 2, 1) i32 @def_use_independent(i32 noundef %input, i32 noundef %unrelated_input) #0 {
+define void @example() #0 {
 entry:
-  %add1 = add i32 %unrelated_input, 9
-  store volatile i32 %add1, ptr @independent_sink, align 4, !tbaa !6
-  %add = shl i32 %input, 1
-  %mul = add i32 %add, 2
-  ret i32 %mul
+  store atomic volatile i32 5, ptr @x monotonic, align 4
+  %0 = load atomic volatile i32, ptr @y monotonic, align 4
+  store i32 %0, ptr @z, align 4, !tbaa !6
+  ret void
 }
 
 attributes #0 = { nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, target_mem0: none, target_mem1: none) uwtable(sync) "frame-pointer"="all" "no-trapping-math"="true" "stack-protector-buffer-size"="4" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+ccpp,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a" "zero-call-used-regs"="used-gpr" }

@@ -3,7 +3,9 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -14,6 +16,42 @@
 using namespace llvm;
 
 namespace {
+
+bool hasDepVecAnnotation(const Function &F) {
+  const Module *M = F.getParent();
+  const GlobalVariable *Annotations =
+      M->getGlobalVariable("llvm.global.annotations");
+  if (!Annotations || !Annotations->hasInitializer())
+    return false;
+
+  const auto *Entries =
+      dyn_cast<ConstantArray>(Annotations->getInitializer());
+  if (!Entries)
+    return false;
+
+  for (const Use &EntryUse : Entries->operands()) {
+    const auto *Entry = dyn_cast<ConstantStruct>(EntryUse.get());
+    if (!Entry || Entry->getNumOperands() < 2)
+      continue;
+
+    const Value *AnnotatedValue =
+        Entry->getOperand(0)->stripPointerCasts();
+    if (AnnotatedValue != &F)
+      continue;
+
+    const auto *AnnotationGlobal = dyn_cast<GlobalVariable>(
+        Entry->getOperand(1)->stripPointerCasts());
+    if (!AnnotationGlobal || !AnnotationGlobal->hasInitializer())
+      continue;
+
+    const auto *Annotation =
+        dyn_cast<ConstantDataArray>(AnnotationGlobal->getInitializer());
+    if (Annotation && Annotation->isString() &&
+        Annotation->getAsCString() == "depvec")
+      return true;
+  }
+  return false;
+}
 
 std::string getFunctionHeader(const Function &F) {
   std::string IR;
@@ -41,7 +79,7 @@ public:
         MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
     for (Function &F : M) {
-      if (F.isDeclaration())
+      if (F.isDeclaration() || !hasDepVecAnnotation(F))
         continue;
 
       errs() << "dependency graph for function " << F.getName() << '\n';
@@ -74,13 +112,17 @@ public:
         }
         if (!FirstSource)
           errs() << " ";
-        errs() << "} -" << Edge.label << "(";
-        bool FirstValue = true;
-        for (const std::string &Value : Edge.values) {
-          errs() << (FirstValue ? "" : ", ") << Value;
-          FirstValue = false;
+        errs() << "} -" << Edge.kind;
+        if (!Edge.values.empty()) {
+          errs() << "(";
+          bool FirstValue = true;
+          for (const std::string &Value : Edge.values) {
+            errs() << (FirstValue ? "" : ", ") << Value;
+            FirstValue = false;
+          }
+          errs() << ")";
         }
-        errs() << ")-> n" << Edge.target << '\n';
+        errs() << "-> n" << Edge.target << '\n';
       }
     }
 
