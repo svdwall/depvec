@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Build DepVec graphs for an LLVM IR file and open the local graph studio."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
+import webbrowser
+
+
+ROOT = Path(__file__).resolve().parent.parent
+FRONTEND = ROOT / "frontend"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the DepVec pass on an LLVM IR file and open Graph Studio."
+    )
+    parser.add_argument("ir", type=Path, help="LLVM IR module (.ll) to analyze")
+    parser.add_argument(
+        "--port", type=int, default=0,
+        help="local web server port (default: choose an available port)",
+    )
+    parser.add_argument(
+        "--no-open", action="store_true",
+        help="print the local URL without opening a browser",
+    )
+    return parser.parse_args()
+
+
+def build_graphs(ir_file: Path, graph_file: Path) -> None:
+    subprocess.run(["make", "build-pass"], cwd=ROOT, check=True)
+
+    plugin_candidates = sorted((ROOT / "result" / "lib").glob("DepVecPass.*"))
+    if not plugin_candidates:
+        raise RuntimeError("The DepVec pass plugin was not found under result/lib.")
+
+    opt = os.environ.get("LLVM_OPT") or shutil.which("opt")
+    if not opt:
+        raise RuntimeError("Could not find `opt` on PATH (or in LLVM_OPT).")
+
+    subprocess.run(
+        [
+            opt,
+            f"-load-pass-plugin={plugin_candidates[0]}",
+            f"-depvec-output={graph_file}",
+            "-passes=depvec",
+            "-disable-output",
+            str(ir_file),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+def make_handler(ir_file: Path, graph_file: Path) -> type[BaseHTTPRequestHandler]:
+    class StudioHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            route = urlsplit(self.path).path
+            if route == "/" or route == "/index.html":
+                self.send_file(FRONTEND / "index.html", "text/html; charset=utf-8")
+            elif route == "/app.js":
+                self.send_file(FRONTEND / "app.js", "text/javascript; charset=utf-8")
+            elif route == "/styles.css":
+                self.send_file(FRONTEND / "styles.css", "text/css; charset=utf-8")
+            elif route == "/api/ir":
+                self.send_file(ir_file, "text/plain; charset=utf-8")
+            elif route == "/api/graphs":
+                self.send_file(graph_file, "application/json; charset=utf-8")
+            elif route == "/api/session":
+                body = json.dumps(
+                    {"irName": ir_file.name, "graphName": "DepVec graph export"}
+                ).encode("utf-8")
+                self.send_body(body, "application/json; charset=utf-8")
+            else:
+                self.send_error(404)
+
+        def send_file(self, path: Path, content_type: str) -> None:
+            try:
+                body = path.read_bytes()
+            except OSError:
+                self.send_error(404)
+                return
+            self.send_body(body, content_type)
+
+        def send_body(self, body: bytes, content_type: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            # Keep the terminal focused on the pass output and launcher URL.
+            return
+
+    return StudioHandler
+
+
+def main() -> int:
+    args = parse_args()
+    ir_file = args.ir.expanduser().resolve()
+    if not ir_file.is_file():
+        print(f"depvec-studio: LLVM IR file not found: {ir_file}", file=sys.stderr)
+        return 2
+    if not 0 <= args.port <= 65535:
+        print("depvec-studio: --port must be between 0 and 65535", file=sys.stderr)
+        return 2
+
+    try:
+        with TemporaryDirectory(prefix="depvec-studio-") as session_dir:
+            graph_file = Path(session_dir) / "depvec-graphs.json"
+            build_graphs(ir_file, graph_file)
+
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", args.port), make_handler(ir_file, graph_file)
+            )
+            server.daemon_threads = True
+            url = f"http://127.0.0.1:{server.server_address[1]}/"
+            print(f"DepVec Graph Studio: {url}", flush=True)
+            if not args.no_open:
+                webbrowser.open(url)
+            print("Press Ctrl-C to stop the local server.", flush=True)
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                server.shutdown()
+                server.server_close()
+    except subprocess.CalledProcessError as error:
+        return error.returncode or 1
+    except (OSError, RuntimeError) as error:
+        print(f"depvec-studio: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

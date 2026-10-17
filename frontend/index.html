@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta id="theme-color" name="theme-color" content="#f4f6fb" />
+    <title>DepVec Graph Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="DepVec Graph Studio home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>depvec<span class="brand-light"> / studio</span></span>
+      </a>
+      <div class="header-files" role="group" aria-label="Workspace files">
+        <label class="header-file-picker" for="ir-file">
+          <span class="header-file-type">LLVM IR</span>
+          <span class="header-file-name" id="ir-name">Choose a .ll file</span>
+          <span class="header-file-action">Browse</span>
+          <input id="ir-file" type="file" accept=".ll,.ir,text/plain" />
+        </label>
+        <label class="header-file-picker" for="graph-file">
+          <span class="header-file-type">Graph JSON</span>
+          <span class="header-file-name" id="graph-name">Choose a graph file</span>
+          <span class="header-file-action">Browse</span>
+          <input id="graph-file" type="file" accept=".json,application/json" />
+        </label>
+      </div>
+      <div class="header-actions">
+        <button id="theme-toggle" class="quiet-button" type="button" aria-pressed="false" aria-label="Switch to dark mode"><span id="theme-label">Dark mode</span></button>
+        <label class="quiet-button" for="layout-file">Open edits<input id="layout-file" type="file" accept=".json,application/json" /></label>
+        <button id="save-layout" class="primary-button" type="button" disabled>Save edits <span aria-hidden="true">↓</span></button>
+      </div>
+      <div id="status-message" class="header-status" role="status">Choose LLVM IR and graph JSON files above.</div>
+    </header>
+
+    <main id="top">
+      <section id="empty-state" class="empty-state" aria-live="polite">
+        <strong>Open a module and its graph export to begin.</strong>
+        <span>Choose both files in the header, or launch with <code>./scripts/depvec-studio path/to/file.ll</code>.</span>
+      </section>
+
+      <section id="workspace" class="workspace" hidden aria-live="polite">
+        <div id="function-grid" class="function-grid"></div>
+      </section>
+    </main>
+  </body>
+</html>
