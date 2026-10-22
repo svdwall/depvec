@@ -11,11 +11,24 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/JSON.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <system_error>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace llvm;
 
 namespace {
+
+cl::opt<std::string> DepVecOutput(
+    "depvec-output",
+    cl::desc("Write DepVec graphs as JSON to the given path"),
+    cl::value_desc("path"), cl::init(""));
 
 bool hasDepVecAnnotation(const Function &F) {
   const Module *M = F.getParent();
@@ -71,6 +84,135 @@ std::string getFunctionHeader(const Function &F) {
   return IR.substr(0, BodyStart + 1);
 }
 
+std::string getInstructionText(const Instruction &I) {
+  std::string Text;
+  raw_string_ostream OS(Text);
+  I.print(OS);
+  OS.flush();
+  return Text;
+}
+
+std::vector<std::string> getFunctionIRLines(const Function &F) {
+  std::string IR;
+  raw_string_ostream OS(IR);
+  F.print(OS);
+  OS.flush();
+
+  std::vector<std::string> Lines;
+  size_t Start = 0;
+  while (Start <= IR.size()) {
+    const size_t End = IR.find('\n', Start);
+    if (End == std::string::npos) {
+      Lines.push_back(IR.substr(Start));
+      break;
+    }
+    Lines.push_back(IR.substr(Start, End - Start));
+    Start = End + 1;
+  }
+  return Lines;
+}
+
+int findInstructionLine(const Instruction &I,
+                        const std::vector<std::string> &Lines,
+                        unsigned StartLine) {
+  const std::string Text = getInstructionText(I);
+  for (unsigned Line = StartLine; Line < Lines.size(); ++Line) {
+    if (StringRef(Lines[Line]).trim() == StringRef(Text).trim())
+      return static_cast<int>(Line);
+  }
+  return -1;
+}
+
+json::Object serializeFunction(const Function &F,
+                               const depvec::DependencyGraph &Graph) {
+  std::string FunctionIR;
+  raw_string_ostream FunctionOS(FunctionIR);
+  F.print(FunctionOS);
+  FunctionOS.flush();
+  const std::vector<std::string> IRLines = getFunctionIRLines(F);
+
+  json::Array Nodes;
+  unsigned SearchLine = 0;
+  for (unsigned Id = 0; Id < Graph.nodes.size(); ++Id) {
+    const auto &Node = Graph.nodes[Id];
+    StringRef Kind = "instruction";
+    int Line = -1;
+    if (Node.kind == depvec::DependencyGraph::Node::Kind::Init) {
+      Kind = "init";
+      Line = 0;
+    } else if (Node.kind == depvec::DependencyGraph::Node::Kind::Exit) {
+      Kind = "exit";
+    }
+
+    std::string InstructionText;
+    if (Node.instruction) {
+      InstructionText = getInstructionText(*Node.instruction);
+      Line = findInstructionLine(*Node.instruction, IRLines, SearchLine);
+      if (Line >= 0)
+        SearchLine = static_cast<unsigned>(Line) + 1;
+    }
+
+    json::Object SerializedNode;
+    SerializedNode["id"] = Id;
+    SerializedNode["kind"] = Kind;
+    SerializedNode["line"] = Line;
+    SerializedNode["instruction"] = std::move(InstructionText);
+    Nodes.push_back(std::move(SerializedNode));
+  }
+
+  json::Array Edges;
+  for (unsigned Index = 0; Index < Graph.edges.size(); ++Index) {
+    const auto &Edge = Graph.edges[Index];
+    json::Array Sources;
+    for (unsigned Source : Edge.sources)
+      Sources.push_back(Source);
+    json::Array Values;
+    for (const std::string &Value : Edge.values)
+      Values.push_back(Value);
+
+    json::Object SerializedEdge;
+    SerializedEdge["id"] = (Twine("e") + Twine(Index)).str();
+    SerializedEdge["sources"] = std::move(Sources);
+    SerializedEdge["target"] = Edge.target;
+    SerializedEdge["kind"] = Edge.kind;
+    SerializedEdge["values"] = std::move(Values);
+    Edges.push_back(std::move(SerializedEdge));
+  }
+
+  json::Object Result;
+  Result["name"] = F.getName();
+  Result["ir"] = std::move(FunctionIR);
+  Result["nodes"] = std::move(Nodes);
+  Result["edges"] = std::move(Edges);
+  return Result;
+}
+
+bool writeGraphJSON(const Module &M, std::vector<json::Object> Functions) {
+  std::error_code EC;
+  raw_fd_ostream OS(DepVecOutput, EC, sys::fs::OF_Text);
+  if (EC) {
+    errs() << "DepVec: unable to write graph JSON to '" << DepVecOutput
+           << "': " << EC.message() << '\n';
+    return false;
+  }
+
+  json::Array SerializedFunctions;
+  for (json::Object &Function : Functions)
+    SerializedFunctions.push_back(std::move(Function));
+  json::Object Root;
+  Root["format"] = "depvec-graph-v1";
+  Root["module"] = M.getModuleIdentifier();
+  Root["functions"] = std::move(SerializedFunctions);
+  OS << formatv("{0:2}\n", json::Value(std::move(Root)));
+  OS.flush();
+  if (OS.has_error()) {
+    errs() << "DepVec: failed while writing graph JSON to '" << DepVecOutput
+           << "'\n";
+    return false;
+  }
+  return true;
+}
+
 class DepVecPass : public PassInfoMixin<DepVecPass> {
 public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
@@ -78,12 +220,14 @@ public:
     FunctionAnalysisManager &FAM =
         MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
+    std::vector<json::Object> SerializedFunctions;
     for (Function &F : M) {
       if (F.isDeclaration() || !hasDepVecAnnotation(F))
         continue;
 
       errs() << "dependency graph for function " << F.getName() << '\n';
       auto &Graph = FAM.getResult<depvec::DependencyGraphAnalysis>(F);
+      SerializedFunctions.push_back(serializeFunction(F, Graph));
 
       for (unsigned Id = 0; Id < Graph.nodes.size(); ++Id) {
         const auto &Node = Graph.nodes[Id];
@@ -125,6 +269,10 @@ public:
         errs() << "-> n" << Edge.target << '\n';
       }
     }
+
+    if (!DepVecOutput.empty() &&
+        !writeGraphJSON(M, std::move(SerializedFunctions)))
+      report_fatal_error("DepVec could not write the graph JSON output");
 
     // This pass only observes the module and does not modify the IR.
     return PreservedAnalyses::all();

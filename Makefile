@@ -1,4 +1,4 @@
-.PHONY: compile-ir compile-examples build-pass nix-build pass lint lint-examples lint-all
+.PHONY: compile-ir compile-examples build-pass nix-build pass graphs lint lint-examples lint-all
 
 EXAMPLE_C_SOURCES := $(wildcard examples/*.c)
 EXAMPLE_LL_FILES := $(patsubst %.c,%.ll,$(EXAMPLE_C_SOURCES))
@@ -28,6 +28,15 @@ pass: build-pass
 	@test -n "$(IR)" || (echo "Set IR=path/to/file.ll" >&2; exit 1)
 	opt \
 		-load-pass-plugin="$(firstword $(wildcard result/lib/DepVecPass.*))" \
+		-passes=depvec -disable-output "$(IR)"
+
+# Export the graphs for annotated functions as JSON for the standalone viewer.
+# Usage: make graphs IR=examples/branch_phi.ll [OUT=depvec-graphs.json]
+graphs: build-pass
+	@test -n "$(IR)" || (echo "Set IR=path/to/file.ll" >&2; exit 1)
+	opt \
+		-load-pass-plugin="$(firstword $(wildcard result/lib/DepVecPass.*))" \
+		-depvec-output="$(or $(OUT),depvec-graphs.json)" \
 		-passes=depvec -disable-output "$(IR)"
 
 # Run clang-tidy on the pass sources using the CMake compile database.
