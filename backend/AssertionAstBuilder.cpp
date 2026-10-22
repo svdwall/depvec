@@ -62,7 +62,16 @@ AssertionAst AssertionAstBuilder::build(
 
 antlrcpp::Any AssertionAstBuilder::visitFormula(
     DepVecAssertionParser::FormulaContext *context) {
-  return visit(context->disjunction());
+  return visit(context->implication());
+}
+
+antlrcpp::Any AssertionAstBuilder::visitImplication(
+    DepVecAssertionParser::ImplicationContext *context) {
+  FormulaPtr left = as<FormulaPtr>(visit(context->disjunction()));
+  if (!context->implication())
+    return left;
+  return makeLogical(LogicalOperator::Implies, std::move(left),
+                     as<FormulaPtr>(visit(context->implication())));
 }
 
 antlrcpp::Any AssertionAstBuilder::visitDisjunction(
@@ -96,8 +105,20 @@ antlrcpp::Any AssertionAstBuilder::visitFormulaPrimary(
     DepVecAssertionParser::FormulaPrimaryContext *context) {
   if (context->TRUE()) return makeBoolean(true);
   if (context->FALSE()) return makeBoolean(false);
+  if (context->pointsTo()) return visit(context->pointsTo());
   if (context->comparison()) return visit(context->comparison());
   return visit(context->formula());
+}
+
+antlrcpp::Any AssertionAstBuilder::visitPointsTo(
+    DepVecAssertionParser::PointsToContext *context) {
+  const std::string pointerName = context->AllocaIdentifier()
+      ? "%" + context->AllocaIdentifier()->getText()
+      : context->GlobalIdentifier()->getText();
+  ExpressionPtr location = makeDereference(pointerName);
+  ExpressionPtr value = as<ExpressionPtr>(visit(context->additive()));
+  return makeComparison(ComparisonOperator::Equal, std::move(location),
+                        std::move(value));
 }
 
 antlrcpp::Any AssertionAstBuilder::visitComparison(
@@ -162,10 +183,15 @@ antlrcpp::Any AssertionAstBuilder::visitPrimary(
     DepVecAssertionParser::PrimaryContext *context) {
   if (context->Integer())
     return makeInteger(std::stoll(context->Integer()->getText()));
-  if (context->STAR())
-    return makeDereference(context->Identifier()->getText());
-  if (context->Identifier())
-    return makeVariable(context->Identifier()->getText());
+  if (context->STAR()) {
+    if (context->GlobalIdentifier())
+      return makeDereference(context->GlobalIdentifier()->getText());
+    return makeDereference(context->LocalIdentifier()->getText());
+  }
+  if (context->GlobalIdentifier())
+    return makeVariable(context->GlobalIdentifier()->getText());
+  if (context->LocalIdentifier())
+    return makeVariable(context->LocalIdentifier()->getText());
   return visit(context->additive());
 }
 

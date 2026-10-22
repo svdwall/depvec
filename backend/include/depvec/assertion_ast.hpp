@@ -41,7 +41,7 @@ struct Expression {
 
 struct BooleanLiteral { bool value; };
 enum class ComparisonOperator { Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual };
-enum class LogicalOperator { And, Or };
+enum class LogicalOperator { And, Or, Implies };
 
 struct ComparisonFormula {
   ComparisonOperator op;
@@ -76,7 +76,7 @@ constexpr std::string_view operatorText(ArithmeticBinaryOperator op) {
 }
 constexpr std::string_view operatorText(ComparisonOperator op) {
   switch (op) {
-  case ComparisonOperator::Equal: return "==";
+  case ComparisonOperator::Equal: return "=";
   case ComparisonOperator::NotEqual: return "!=";
   case ComparisonOperator::Less: return "<";
   case ComparisonOperator::LessEqual: return "<=";
@@ -89,6 +89,7 @@ constexpr std::string_view operatorText(LogicalOperator op) {
   switch (op) {
   case LogicalOperator::And: return "&&";
   case LogicalOperator::Or: return "||";
+  case LogicalOperator::Implies: return "->";
   }
   return "?";
 }

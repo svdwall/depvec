@@ -1,4 +1,4 @@
-.PHONY: compile-ir compile-examples build-pass nix-build pass graphs lint lint-examples lint-all
+.PHONY: compile-ir compile-examples build-pass build-backend parse-graph nix-build pass graphs lint lint-examples lint-all
 
 EXAMPLE_C_SOURCES := $(wildcard examples/*.c)
 EXAMPLE_LL_FILES := $(patsubst %.c,%.ll,$(EXAMPLE_C_SOURCES))
@@ -19,6 +19,17 @@ examples/%.ll: examples/%.c examples/depvec.h
 
 build-pass:
 	nix build .#depvec-pass --out-link result
+
+# Configure and build the standalone backend in the Nix development shell.
+build-backend:
+	nix develop --command cmake -S backend -B backend/build
+	nix develop --command cmake --build backend/build -j4
+
+# Parse a v2 graph JSON file with the backend reader.
+# Usage: make parse-graph GRAPH=depvec-graphs.json
+parse-graph: build-backend
+	@test -n "$(GRAPH)" || (echo "Set GRAPH=path/to/graph.json" >&2; exit 1)
+	backend/build/depvec-graph-parse "$(GRAPH)"
 
 nix-build: build-pass
 

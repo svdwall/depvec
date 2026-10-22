@@ -50,6 +50,8 @@ local port.
 - Click assertion text to edit it (default: `{ }`); drag its HTML frame vertically along the edge track. Focus the frame and use the up/down arrow keys to nudge it.
 - Choose **Save edits** to download a `.depvec-layout.json` file.
 - Use **Open edits** to restore those labels and positions along their edge tracks later.
+- Choose **Export graph** to download a v2 graph JSON with the current edge assertions written into each edge's `assertion` field. Empty labels are exported as empty assertions, which the backend treats as `true`.
 
-The LLVM IR and graph export are read-only in the frontend. Layout edits are
-stored separately and keyed by function, node ID, and edge ID.
+The loaded LLVM IR and graph are read-only; **Export graph** creates a separate
+graph file. Layout edits are stored separately and keyed by function, node ID,
+and edge ID.

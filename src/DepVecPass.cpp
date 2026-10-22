@@ -7,6 +7,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Plugins/PassPlugin.h"
@@ -123,6 +125,210 @@ int findInstructionLine(const Instruction &I,
   return -1;
 }
 
+std::string getLocalName(const Value &V) {
+  std::string Name;
+  raw_string_ostream OS(Name);
+  V.printAsOperand(OS, false);
+  OS.flush();
+  if (!Name.empty() && Name.front() == '%')
+    Name.erase(Name.begin());
+  return Name;
+}
+
+json::Value serializeValue(const Value &V) {
+  if (const auto *Constant = dyn_cast<ConstantInt>(&V)) {
+    SmallString<40> Decimal;
+    Constant->getValue().toString(Decimal, 10, true);
+    json::Object Result;
+    Result["kind"] = "integer";
+    Result["value"] = Decimal.str().str();
+    return Result;
+  }
+  if (isa<Argument>(V) || isa<Instruction>(V)) {
+    json::Object Result;
+    Result["kind"] = "ref";
+    Result["name"] = getLocalName(V);
+    return Result;
+  }
+  json::Object Unsupported;
+  Unsupported["kind"] = "unsupported";
+  std::string Text;
+  raw_string_ostream OS(Text);
+  V.printAsOperand(OS, false);
+  OS.flush();
+  Unsupported["text"] = std::move(Text);
+  return Unsupported;
+}
+
+json::Value serializePointer(const Value &V) {
+  json::Object Result;
+  if (const auto *Alloca = dyn_cast<AllocaInst>(&V)) {
+    Result["alloca"] = getLocalName(*Alloca);
+    return Result;
+  }
+  if (const auto *Global = dyn_cast<GlobalVariable>(&V)) {
+    Result["global"] = Global->getName();
+    return Result;
+  }
+  Result["unsupported"] = true;
+  return Result;
+}
+
+bool hasSupportedPointerOrigin(const Value &V) {
+  return isa<AllocaInst>(V) || isa<GlobalVariable>(V);
+}
+
+json::Value serializeIntegerType(Type *Ty) {
+  if (!Ty->isIntegerTy())
+    return nullptr;
+  return Ty->getIntegerBitWidth();
+}
+
+StringRef orderingName(AtomicOrdering Ordering) {
+  switch (Ordering) {
+  case AtomicOrdering::NotAtomic:
+  case AtomicOrdering::Unordered:
+  case AtomicOrdering::Monotonic:
+    return "relaxed";
+  case AtomicOrdering::Acquire:
+    return "acquire";
+  case AtomicOrdering::Release:
+    return "release";
+  case AtomicOrdering::AcquireRelease:
+    return "acq_rel";
+  case AtomicOrdering::SequentiallyConsistent:
+    return "seq_cst";
+  }
+  llvm_unreachable("unknown atomic ordering");
+}
+
+json::Object unsupportedOperation(const Instruction &I, StringRef Reason) {
+  json::Object Result;
+  Result["opcode"] = "unsupported";
+  Result["reason"] = (Twine(Reason) + ": " + I.getOpcodeName()).str();
+  return Result;
+}
+
+json::Object serializeInstruction(const Instruction &I) {
+  json::Object Result;
+  Result["opcode"] = I.getOpcodeName();
+
+  if (const auto *Binary = dyn_cast<BinaryOperator>(&I)) {
+    if (!Binary->getType()->isIntegerTy() ||
+        (I.getOpcode() != Instruction::Add &&
+         I.getOpcode() != Instruction::Sub &&
+         I.getOpcode() != Instruction::Mul))
+      return unsupportedOperation(I, "unsupported binary operation or type");
+    Result["result"] = getLocalName(I);
+    Result["type"] = serializeIntegerType(Binary->getType());
+    Result["left"] = serializeValue(*Binary->getOperand(0));
+    Result["right"] = serializeValue(*Binary->getOperand(1));
+    Result["nsw"] = Binary->hasNoSignedWrap();
+    Result["nuw"] = Binary->hasNoUnsignedWrap();
+    return Result;
+  }
+  if (const auto *Compare = dyn_cast<ICmpInst>(&I)) {
+    if (!Compare->getOperand(0)->getType()->isIntegerTy())
+      return unsupportedOperation(I, "icmp requires scalar integer operands");
+    Result["result"] = getLocalName(I);
+    Result["predicate"] = ICmpInst::getPredicateName(Compare->getPredicate());
+    Result["operandType"] = serializeIntegerType(Compare->getOperand(0)->getType());
+    Result["left"] = serializeValue(*Compare->getOperand(0));
+    Result["right"] = serializeValue(*Compare->getOperand(1));
+    return Result;
+  }
+  if (const auto *Alloca = dyn_cast<AllocaInst>(&I)) {
+    const auto *Count = dyn_cast<ConstantInt>(Alloca->getArraySize());
+    if (!Count || !Count->isOne() || !Alloca->getAllocatedType()->isIntegerTy())
+      return unsupportedOperation(I, "only scalar integer allocas are supported");
+    Result["result"] = getLocalName(I);
+    Result["allocatedType"] = serializeIntegerType(Alloca->getAllocatedType());
+    return Result;
+  }
+  if (const auto *Load = dyn_cast<LoadInst>(&I)) {
+    if (!Load->getType()->isIntegerTy())
+      return unsupportedOperation(I, "only scalar integer loads are supported");
+    if (Load->isVolatile())
+      return unsupportedOperation(I, "volatile loads are not represented");
+    if (!hasSupportedPointerOrigin(*Load->getPointerOperand()))
+      return unsupportedOperation(I, "only direct alloca or global pointers are supported");
+    Result["result"] = getLocalName(I);
+    Result["pointer"] = serializePointer(*Load->getPointerOperand());
+    Result["type"] = serializeIntegerType(Load->getType());
+    Result["ordering"] = orderingName(Load->getOrdering());
+    return Result;
+  }
+  if (const auto *Store = dyn_cast<StoreInst>(&I)) {
+    if (!Store->getValueOperand()->getType()->isIntegerTy())
+      return unsupportedOperation(I, "only scalar integer stores are supported");
+    if (Store->isVolatile())
+      return unsupportedOperation(I, "volatile stores are not represented");
+    if (!hasSupportedPointerOrigin(*Store->getPointerOperand()))
+      return unsupportedOperation(I, "only direct alloca or global pointers are supported");
+    Result["value"] = serializeValue(*Store->getValueOperand());
+    Result["pointer"] = serializePointer(*Store->getPointerOperand());
+    Result["type"] = serializeIntegerType(Store->getValueOperand()->getType());
+    Result["ordering"] = orderingName(Store->getOrdering());
+    return Result;
+  }
+  if (const auto *CmpXchg = dyn_cast<AtomicCmpXchgInst>(&I)) {
+    if (!CmpXchg->getCompareOperand()->getType()->isIntegerTy())
+      return unsupportedOperation(I, "cmpxchg requires scalar integer operands");
+    if (CmpXchg->isVolatile())
+      return unsupportedOperation(I, "volatile cmpxchg is not represented");
+    if (!hasSupportedPointerOrigin(*CmpXchg->getPointerOperand()))
+      return unsupportedOperation(I, "only direct alloca or global pointers are supported");
+    Result["result"] = getLocalName(I);
+    Result["pointer"] = serializePointer(*CmpXchg->getPointerOperand());
+    Result["expected"] = serializeValue(*CmpXchg->getCompareOperand());
+    Result["replacement"] = serializeValue(*CmpXchg->getNewValOperand());
+    Result["type"] = serializeIntegerType(CmpXchg->getCompareOperand()->getType());
+    Result["successOrdering"] = orderingName(CmpXchg->getSuccessOrdering());
+    Result["failureOrdering"] = orderingName(CmpXchg->getFailureOrdering());
+    Result["weak"] = CmpXchg->isWeak();
+    return Result;
+  }
+  if (const auto *Extract = dyn_cast<ExtractValueInst>(&I)) {
+    if (Extract->getNumIndices() != 1 ||
+        !isa<AtomicCmpXchgInst>(Extract->getAggregateOperand()) ||
+        !Extract->getType()->isIntegerTy() || *Extract->idx_begin() > 1)
+      return unsupportedOperation(I, "only cmpxchg result fields 0 and 1 are supported");
+    Result["result"] = getLocalName(I);
+    Result["aggregate"] = getLocalName(*Extract->getAggregateOperand());
+    Result["index"] = *Extract->idx_begin();
+    Result["resultType"] = serializeIntegerType(Extract->getType());
+    return Result;
+  }
+  if (const auto *Branch = dyn_cast<BranchInst>(&I)) {
+    if (Branch->isConditional()) {
+      Result["condition"] = serializeValue(*Branch->getCondition());
+      Result["target"] = getLocalName(*Branch->getSuccessor(0));
+      Result["falseTarget"] = getLocalName(*Branch->getSuccessor(1));
+    } else {
+      Result["condition"] = nullptr;
+      Result["target"] = getLocalName(*Branch->getSuccessor(0));
+      Result["falseTarget"] = nullptr;
+    }
+    return Result;
+  }
+  if (const auto *Phi = dyn_cast<PHINode>(&I)) {
+    if (!Phi->getType()->isIntegerTy())
+      return unsupportedOperation(I, "only scalar integer phi nodes are supported");
+    json::Array Incoming;
+    for (unsigned Index = 0; Index < Phi->getNumIncomingValues(); ++Index) {
+      json::Object Entry;
+      Entry["value"] = serializeValue(*Phi->getIncomingValue(Index));
+      Entry["predecessor"] = getLocalName(*Phi->getIncomingBlock(Index));
+      Incoming.push_back(std::move(Entry));
+    }
+    Result["result"] = getLocalName(I);
+    Result["type"] = serializeIntegerType(Phi->getType());
+    Result["incoming"] = std::move(Incoming);
+    return Result;
+  }
+  return unsupportedOperation(I, "instruction is not in the supported set");
+}
+
 json::Object serializeFunction(const Function &F,
                                const depvec::DependencyGraph &Graph) {
   std::string FunctionIR;
@@ -157,6 +363,9 @@ json::Object serializeFunction(const Function &F,
     SerializedNode["kind"] = Kind;
     SerializedNode["line"] = Line;
     SerializedNode["instruction"] = std::move(InstructionText);
+    if (Node.kind == depvec::DependencyGraph::Node::Kind::Instruction &&
+        Node.instruction)
+      SerializedNode["operation"] = serializeInstruction(*Node.instruction);
     Nodes.push_back(std::move(SerializedNode));
   }
 
@@ -176,6 +385,7 @@ json::Object serializeFunction(const Function &F,
     SerializedEdge["target"] = Edge.target;
     SerializedEdge["kind"] = Edge.kind;
     SerializedEdge["values"] = std::move(Values);
+    SerializedEdge["assertion"] = "";
     Edges.push_back(std::move(SerializedEdge));
   }
 
@@ -200,7 +410,7 @@ bool writeGraphJSON(const Module &M, std::vector<json::Object> Functions) {
   for (json::Object &Function : Functions)
     SerializedFunctions.push_back(std::move(Function));
   json::Object Root;
-  Root["format"] = "depvec-graph-v1";
+  Root["format"] = "depvec-graph-v2";
   Root["module"] = M.getModuleIdentifier();
   Root["functions"] = std::move(SerializedFunctions);
   OS << formatv("{0:2}\n", json::Value(std::move(Root)));

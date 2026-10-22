@@ -26,6 +26,7 @@
         ninja
         antlr4
         antlr4.runtime.cpp
+        nlohmann_json
         llvmPackages_22.clang
         llvmPackages_22.clang-tools
         llvmPackages_22.libllvm

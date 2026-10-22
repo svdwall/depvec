@@ -1,0 +1,56 @@
+{
+  "format": "depvec-graph-v2",
+  "module": "minimal.ll",
+  "functions": [
+    {
+      "name": "example",
+      "ir": "define void @example() {\nentry:\n  %buf = alloca i32, align 4\n  store i32 42, ptr %buf, align 4\n  ret void\n}",
+      "nodes": [
+        { "id": 0, "kind": "init", "line": 0, "instruction": "" },
+        {
+          "id": 1,
+          "kind": "instruction",
+          "line": 2,
+          "instruction": "%buf = alloca i32, align 4",
+          "operation": {
+            "opcode": "alloca",
+            "result": "buf",
+            "allocatedType": 32
+          }
+        },
+        {
+          "id": 2,
+          "kind": "instruction",
+          "line": 3,
+          "instruction": "store i32 42, ptr %buf, align 4",
+          "operation": {
+            "opcode": "store",
+            "value": { "kind": "integer", "value": "42" },
+            "pointer": { "alloca": "buf" },
+            "type": 32,
+            "ordering": "relaxed"
+          }
+        },
+        { "id": 3, "kind": "exit", "line": 4, "instruction": "ret void" }
+      ],
+      "edges": [
+        {
+          "id": "e0",
+          "sources": [1],
+          "target": 2,
+          "kind": "data",
+          "values": ["%buf"],
+          "assertion": "%n > 0 && buf |-> 42"
+        },
+        {
+          "id": "e1",
+          "sources": [],
+          "target": 3,
+          "kind": "control",
+          "values": [],
+          "assertion": ""
+        }
+      ]
+    }
+  ]
+}

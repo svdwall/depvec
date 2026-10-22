@@ -1,0 +1,215 @@
+{
+  "format": "depvec-graph-v2",
+  "functions": [
+    {
+      "edges": [
+        {
+          "assertion": "@shared_value |-> 42",
+          "id": "e0",
+          "kind": "memory (release)",
+          "sources": [
+            1
+          ],
+          "target": 2,
+          "values": []
+        }
+      ],
+      "ir": "; Function Attrs: mustprogress nofree norecurse nounwind sspstrong willreturn memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine void @message_passing_writer() #0 {\nentry:\n  store atomic i32 42, ptr @shared_value monotonic, align 4\n  store atomic i32 1, ptr @ready release, align 4\n  ret void\n}\n",
+      "name": "message_passing_writer",
+      "nodes": [
+        {
+          "id": 0,
+          "instruction": "",
+          "kind": "init",
+          "line": 0
+        },
+        {
+          "id": 1,
+          "instruction": "  store atomic i32 42, ptr @shared_value monotonic, align 4",
+          "kind": "instruction",
+          "line": 3,
+          "operation": {
+            "opcode": "store",
+            "ordering": "relaxed",
+            "pointer": {
+              "global": "shared_value"
+            },
+            "type": 32,
+            "value": {
+              "kind": "integer",
+              "value": "42"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "instruction": "  store atomic i32 1, ptr @ready release, align 4",
+          "kind": "instruction",
+          "line": 4,
+          "operation": {
+            "opcode": "store",
+            "ordering": "release",
+            "pointer": {
+              "global": "ready"
+            },
+            "type": 32,
+            "value": {
+              "kind": "integer",
+              "value": "1"
+            }
+          }
+        },
+        {
+          "id": 3,
+          "instruction": "  ret void",
+          "kind": "exit",
+          "line": 5
+        }
+      ]
+    },
+    {
+      "edges": [
+        {
+          "assertion": "",
+          "id": "e0",
+          "kind": "data",
+          "sources": [
+            2
+          ],
+          "target": 3,
+          "values": [
+            "%0"
+          ]
+        },
+        {
+          "assertion": "",
+          "id": "e1",
+          "kind": "data",
+          "sources": [
+            3
+          ],
+          "target": 4,
+          "values": [
+            "%cmp"
+          ]
+        },
+        {
+          "assertion": "",
+          "id": "e2",
+          "kind": "data",
+          "sources": [
+            5
+          ],
+          "target": 6,
+          "values": [
+            "%1"
+          ]
+        },
+        {
+          "assertion": "%0 = 1 -> @shared_value |-> 42",
+          "id": "e3",
+          "kind": "memory (acquire)",
+          "sources": [
+            2
+          ],
+          "target": 5,
+          "values": []
+        }
+      ],
+      "ir": "; Function Attrs: nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine i32 @message_passing_reader() #1 {\nentry:\n  br label %while.cond\n\nwhile.cond:                                       ; preds = %while.cond, %entry\n  %0 = load atomic i32, ptr @ready acquire, align 4\n  %cmp = icmp eq i32 %0, 0\n  br i1 %cmp, label %while.cond, label %while.end, !llvm.loop !10\n\nwhile.end:                                        ; preds = %while.cond\n  %1 = load atomic i32, ptr @shared_value monotonic, align 4\n  ret i32 %1\n}\n",
+      "name": "message_passing_reader",
+      "nodes": [
+        {
+          "id": 0,
+          "instruction": "",
+          "kind": "init",
+          "line": 0
+        },
+        {
+          "id": 1,
+          "instruction": "  br label %while.cond",
+          "kind": "instruction",
+          "line": 3,
+          "operation": {
+            "condition": null,
+            "falseTarget": null,
+            "opcode": "br",
+            "target": "while.cond"
+          }
+        },
+        {
+          "id": 2,
+          "instruction": "  %0 = load atomic i32, ptr @ready acquire, align 4",
+          "kind": "instruction",
+          "line": 6,
+          "operation": {
+            "opcode": "load",
+            "ordering": "acquire",
+            "pointer": {
+              "global": "ready"
+            },
+            "result": "0",
+            "type": 32
+          }
+        },
+        {
+          "id": 3,
+          "instruction": "  %cmp = icmp eq i32 %0, 0",
+          "kind": "instruction",
+          "line": 7,
+          "operation": {
+            "left": {
+              "kind": "ref",
+              "name": "0"
+            },
+            "opcode": "icmp",
+            "operandType": 32,
+            "predicate": "eq",
+            "result": "cmp",
+            "right": {
+              "kind": "integer",
+              "value": "0"
+            }
+          }
+        },
+        {
+          "id": 4,
+          "instruction": "  br i1 %cmp, label %while.cond, label %while.end, !llvm.loop !10",
+          "kind": "instruction",
+          "line": 8,
+          "operation": {
+            "condition": {
+              "kind": "ref",
+              "name": "cmp"
+            },
+            "falseTarget": "while.end",
+            "opcode": "br",
+            "target": "while.cond"
+          }
+        },
+        {
+          "id": 5,
+          "instruction": "  %1 = load atomic i32, ptr @shared_value monotonic, align 4",
+          "kind": "instruction",
+          "line": 11,
+          "operation": {
+            "opcode": "load",
+            "ordering": "relaxed",
+            "pointer": {
+              "global": "shared_value"
+            },
+            "result": "1",
+            "type": 32
+          }
+        },
+        {
+          "id": 6,
+          "instruction": "  ret i32 %1",
+          "kind": "exit",
+          "line": 12
+        }
+      ]
+    }
+  ],
+  "module": "/Users/soren/Documents/projects/depvec/examples/message_passing.ll"
+}

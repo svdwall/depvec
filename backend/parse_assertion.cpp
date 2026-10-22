@@ -1,7 +1,4 @@
-#include "depvec/assertion_ast_builder.hpp"
-#include "DepVecAssertionLexer.h"
-#include "DepVecAssertionParser.h"
-#include "antlr4-runtime.h"
+#include "depvec/assertion_parser.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -71,17 +68,12 @@ int main(int argc, char **argv) {
   const std::string source{std::istreambuf_iterator<char>(file),
                            std::istreambuf_iterator<char>()};
 
-  antlr4::ANTLRInputStream input(source);
-  DepVecAssertionLexer lexer(&input);
-  antlr4::CommonTokenStream tokens(&lexer);
-  DepVecAssertionParser parser(&tokens);
-  auto *tree = parser.assertion();
-
-  if (parser.getNumberOfSyntaxErrors() != 0)
+  try {
+    const auto formula = depvec::parseAssertion(source);
+    std::cout << "Parsed AST: " << formatFormula(*formula) << '\n';
+  } catch (const std::exception &error) {
+    std::cerr << error.what() << '\n';
     return 1;
-
-  depvec::AssertionAstBuilder builder;
-  const depvec::AssertionAst ast = builder.build(tree);
-  std::cout << "Parsed AST: " << formatFormula(*ast.formula) << '\n';
+  }
   return 0;
 }

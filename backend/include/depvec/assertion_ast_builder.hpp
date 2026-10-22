@@ -13,6 +13,8 @@ public:
 
   antlrcpp::Any visitFormula(
       DepVecAssertionParser::FormulaContext *context) override;
+  antlrcpp::Any visitImplication(
+      DepVecAssertionParser::ImplicationContext *context) override;
   antlrcpp::Any visitDisjunction(
       DepVecAssertionParser::DisjunctionContext *context) override;
   antlrcpp::Any visitConjunction(
@@ -21,6 +23,8 @@ public:
       DepVecAssertionParser::FormulaUnaryContext *context) override;
   antlrcpp::Any visitFormulaPrimary(
       DepVecAssertionParser::FormulaPrimaryContext *context) override;
+  antlrcpp::Any visitPointsTo(
+      DepVecAssertionParser::PointsToContext *context) override;
   antlrcpp::Any visitComparison(
       DepVecAssertionParser::ComparisonContext *context) override;
   antlrcpp::Any visitAdditive(

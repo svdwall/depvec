@@ -30,6 +30,7 @@ const workspace = $('#workspace');
 const emptyState = $('#empty-state');
 const functionGrid = $('#function-grid');
 const saveButton = $('#save-layout');
+const exportGraphButton = $('#export-graph');
 const themeToggle = $('#theme-toggle');
 const themeLabel = $('#theme-label');
 
@@ -112,6 +113,7 @@ layoutInput.addEventListener('change', async () => {
 });
 
 saveButton.addEventListener('click', saveLayout);
+exportGraphButton.addEventListener('click', exportGraph);
 
 loadCommandLineSession();
 
@@ -197,7 +199,7 @@ function openEdgeLabelEditor(model, edge, position) {
     .find((label) => label.dataset.edgeId === String(edge.id));
   displayedLabel?.classList.add('editing');
   const edgeLayout = getFunctionLayout(model.function.name).edges[edge.id];
-  const originalLabel = edgeLayout.label || '';
+  const originalLabel = edgeLayout.label ?? edge.assertion ?? '';
   const kindText = String(edge.kind || 'dependency');
   const frame = document.createElement('div');
   frame.className = 'edge-inline-editor';
@@ -271,7 +273,7 @@ function setStatus(message, isError = false) {
 }
 
 function validateGraphDocument(document) {
-  if (document?.format !== 'depvec-graph-v1' || !Array.isArray(document.functions)) {
+  if (document?.format !== 'depvec-graph-v2' || !Array.isArray(document.functions)) {
     throw new Error('This is not a DepVec graph export. Generate one with `make graphs IR=path/to/file.ll`.');
   }
   for (const fn of document.functions) {
@@ -287,6 +289,7 @@ function refreshWorkspace() {
     workspace.hidden = true;
     emptyState.hidden = false;
     saveButton.disabled = true;
+    exportGraphButton.disabled = true;
     setStatus(state.irFile || state.graphDoc
       ? 'Choose the matching LLVM IR and graph export in the header.'
       : 'Choose LLVM IR and graph JSON files above.');
@@ -298,6 +301,7 @@ function refreshWorkspace() {
   workspace.hidden = false;
   emptyState.hidden = true;
   saveButton.disabled = false;
+  exportGraphButton.disabled = false;
   setStatus(state.models.length
     ? `${state.models.length} marked function${state.models.length === 1 ? '' : 's'} loaded from the graph export.`
     : 'No functions marked with the depvec annotation were found in this graph export.');
@@ -779,7 +783,7 @@ function drawOverlay(model) {
     const color = edgeColor(edge.kind);
 
     const edgeLayout = layout.edges[String(edge.id)];
-    const customLabel = edgeLayout.label || '';
+    const customLabel = edgeLayout.label ?? edge.assertion ?? '';
     const fullLabel = `{ ${customLabel} }`;
     const kindText = String(edge.kind || 'dependency');
     const labelWidth = edgeLabelWidth(edge.kind, customLabel);
@@ -1009,4 +1013,30 @@ function saveLayout() {
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   setStatus('Saved editable labels and their positions along the edge tracks.');
+}
+
+function exportGraph() {
+  if (!state.graphDoc) return;
+
+  const graph = JSON.parse(JSON.stringify(state.graphDoc));
+  for (const fn of graph.functions) {
+    const editedEdges = state.layoutDoc.functions?.[fn.name]?.edges || {};
+    for (const edge of fn.edges) {
+      const editedAssertion = editedEdges[String(edge.id)]?.label;
+      edge.assertion = editedAssertion === undefined
+        ? String(edge.assertion || '').trim()
+        : String(editedAssertion).trim();
+    }
+  }
+
+  const blob = new Blob([`${JSON.stringify(graph, null, 2)}\n`], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const base = (state.irFile?.name || state.graphFile?.name || 'depvec')
+    .replace(/\.(ll|ir|json)$/i, '');
+  link.href = url;
+  link.download = `${base}.depvec-graph.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setStatus('Exported the graph with the current edge assertions.');
 }

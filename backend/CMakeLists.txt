@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
-project(DepVecAssertionParser LANGUAGES CXX)
+project(DepVecBackend LANGUAGES CXX)
 
 find_package(antlr4-runtime CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 find_program(ANTLR4_EXECUTABLE NAMES antlr4 REQUIRED)
 
 set(ANTLR_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -18,8 +19,10 @@ set(ANTLR_GENERATED_HEADERS
   "${ANTLR_GENERATED_DIR}/DepVecAssertionBaseVisitor.h"
 )
 
-set(BACKEND_AST_SOURCES
+set(BACKEND_SOURCES
+  AssertionParser.cpp
   AssertionAstBuilder.cpp
+  GraphJsonReader.cpp
 )
 
 add_custom_command(
@@ -32,17 +35,22 @@ add_custom_command(
   VERBATIM
 )
 
-add_library(DepVecAssertionParser STATIC
+add_library(DepVecBackend STATIC
   ${ANTLR_GENERATED_SOURCES}
-  ${BACKEND_AST_SOURCES}
+  ${BACKEND_SOURCES}
 )
-target_compile_features(DepVecAssertionParser PUBLIC cxx_std_17)
-target_include_directories(DepVecAssertionParser
+target_compile_features(DepVecBackend PUBLIC cxx_std_17)
+target_include_directories(DepVecBackend
   PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${ANTLR_GENERATED_DIR}"
 )
-target_link_libraries(DepVecAssertionParser PUBLIC antlr4_shared)
+target_link_libraries(DepVecBackend
+  PUBLIC antlr4_shared nlohmann_json::nlohmann_json
+)
 
 add_executable(depvec-assertion-parse parse_assertion.cpp)
-target_link_libraries(depvec-assertion-parse PRIVATE DepVecAssertionParser)
+target_link_libraries(depvec-assertion-parse PRIVATE DepVecBackend)
+
+add_executable(depvec-graph-parse parse_graph.cpp)
+target_link_libraries(depvec-graph-parse PRIVATE DepVecBackend)
