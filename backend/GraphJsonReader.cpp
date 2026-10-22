@@ -8,6 +8,7 @@
 #include <iterator>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -15,6 +16,119 @@ namespace depvec {
 namespace {
 
 using Json = nlohmann::json;
+
+struct InstructionReferences {
+  std::unordered_set<std::string> values;
+  std::unordered_set<std::string> allocas;
+  std::unordered_set<std::string> globals;
+};
+
+void collectValue(const Value &value, InstructionReferences &references) {
+  if (const auto *ref = std::get_if<ValueRef>(&value))
+    references.values.insert(ref->name);
+}
+
+void collectPointer(const Pointer &pointer, InstructionReferences &references) {
+  std::visit([&](const auto &ref) {
+    using Ref = std::decay_t<decltype(ref)>;
+    if constexpr (std::is_same_v<Ref, AllocaPointer>)
+      references.allocas.insert(ref.allocaSite);
+    else
+      references.globals.insert(ref.globalName);
+  }, pointer);
+}
+
+InstructionReferences collectInstructionReferences(const FunctionGraph &function) {
+  InstructionReferences references;
+  for (const GraphNode &graphNode : function.nodes) {
+    const auto *node = std::get_if<InstructionNode>(&graphNode);
+    if (!node) continue;
+    std::visit([&](const auto &instruction) {
+      using Op = std::decay_t<decltype(instruction)>;
+      if constexpr (std::is_same_v<Op, IntegerBinaryInstruction>) {
+        references.values.insert(instruction.result.name);
+        collectValue(instruction.left, references);
+        collectValue(instruction.right, references);
+      } else if constexpr (std::is_same_v<Op, IntegerCompareInstruction>) {
+        references.values.insert(instruction.result.name);
+        collectValue(instruction.left, references);
+        collectValue(instruction.right, references);
+      } else if constexpr (std::is_same_v<Op, AllocaInstruction>) {
+        references.values.insert(instruction.result.allocaSite);
+        references.allocas.insert(instruction.result.allocaSite);
+      } else if constexpr (std::is_same_v<Op, LoadInstruction>) {
+        references.values.insert(instruction.result.name);
+        collectPointer(instruction.pointer, references);
+      } else if constexpr (std::is_same_v<Op, StoreInstruction>) {
+        collectValue(instruction.value, references);
+        collectPointer(instruction.pointer, references);
+      } else if constexpr (std::is_same_v<Op, CompareExchangeInstruction>) {
+        references.values.insert(instruction.result.name);
+        collectPointer(instruction.pointer, references);
+        collectValue(instruction.expected, references);
+        collectValue(instruction.replacement, references);
+      } else if constexpr (std::is_same_v<Op, ExtractValueInstruction>) {
+        references.values.insert(instruction.result.name);
+        references.values.insert(instruction.aggregate.name);
+      } else if constexpr (std::is_same_v<Op, BranchInstruction>) {
+        if (instruction.condition)
+          collectValue(*instruction.condition, references);
+      } else if constexpr (std::is_same_v<Op, PhiInstruction>) {
+        references.values.insert(instruction.result.name);
+        for (const PhiIncoming &incoming : instruction.incoming)
+          collectValue(incoming.value, references);
+      }
+    }, node->instruction.node);
+  }
+  return references;
+}
+
+void validateExpressionReferences(const Expression &expression,
+                                  const InstructionReferences &references,
+                                  const std::string &context) {
+  std::visit([&](const auto &node) {
+    using Expr = std::decay_t<decltype(node)>;
+    if constexpr (std::is_same_v<Expr, Variable>) {
+      if (!references.values.count(node.value.name))
+        throw std::runtime_error(context + ": assertion references unknown LLVM value '%" +
+                                 node.value.name + "'");
+    } else if constexpr (std::is_same_v<Expr, Dereference>) {
+      std::visit([&](const auto &pointer) {
+        using Ref = std::decay_t<decltype(pointer)>;
+        if constexpr (std::is_same_v<Ref, AllocaPointer>) {
+          if (!references.allocas.count(pointer.allocaSite))
+            throw std::runtime_error(context + ": assertion dereferences unknown alloca '%" +
+                                     pointer.allocaSite + "'");
+        } else if (!references.globals.count(pointer.globalName)) {
+          throw std::runtime_error(context + ": assertion dereferences unknown global '@" +
+                                   pointer.globalName + "'");
+        }
+      }, node.pointer);
+    } else if constexpr (std::is_same_v<Expr, ArithmeticUnaryExpression>) {
+      validateExpressionReferences(*node.operand, references, context);
+    } else if constexpr (std::is_same_v<Expr, ArithmeticBinaryExpression>) {
+      validateExpressionReferences(*node.left, references, context);
+      validateExpressionReferences(*node.right, references, context);
+    }
+  }, expression.node);
+}
+
+void validateFormulaReferences(const Formula &formula,
+                              const InstructionReferences &references,
+                              const std::string &context) {
+  std::visit([&](const auto &node) {
+    using Expr = std::decay_t<decltype(node)>;
+    if constexpr (std::is_same_v<Expr, ComparisonFormula>) {
+      validateExpressionReferences(*node.left, references, context);
+      validateExpressionReferences(*node.right, references, context);
+    } else if constexpr (std::is_same_v<Expr, LogicalFormula>) {
+      validateFormulaReferences(*node.left, references, context);
+      validateFormulaReferences(*node.right, references, context);
+    } else if constexpr (std::is_same_v<Expr, NegationFormula>) {
+      validateFormulaReferences(*node.operand, references, context);
+    }
+  }, formula.node);
+}
 
 const Json &field(const Json &object, const char *key,
                   const std::string &context) {
@@ -388,9 +502,15 @@ FunctionGraph parseFunction(const Json &value) {
       requireKnownAlloca(cmpxchg->pointer);
   }
 
+  const InstructionReferences instructionReferences =
+      collectInstructionReferences(function);
+
   std::unordered_set<std::string> edgeIds;
   for (const Json &edgeValue : edges) {
     GraphEdge edge = parseEdge(edgeValue, function.name);
+    validateFormulaReferences(
+        *edge.assertion, instructionReferences,
+        "function '" + function.name + "' edge '" + edge.id + "' assertion");
     if (!edgeIds.insert(edge.id).second)
       throw std::runtime_error("function '" + function.name + "': duplicate edge ID '" +
                                edge.id + "'");

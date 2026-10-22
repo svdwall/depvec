@@ -40,7 +40,7 @@
           "target": 2,
           "kind": "data",
           "values": ["%buf"],
-          "assertion": "%n > 0 && buf |-> 42"
+          "assertion": "buf |-> 42"
         },
         {
           "id": "e1",

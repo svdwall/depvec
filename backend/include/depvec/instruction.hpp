@@ -7,30 +7,14 @@
 #include <variant>
 #include <vector>
 
+#include "depvec/ir_reference.hpp"
+
 namespace depvec {
 
 // LLVM integer type. A width of 1 represents i1.
 struct IntegerType {
   std::uint32_t bitWidth;
 };
-
-// Integer SSA values correspond to LLVM %names (including function
-// arguments). Names are stored without the sigil.
-struct ValueRef {
-  std::string name;
-};
-
-// Pointer identities are restricted to direct alloca results or global
-// variables. Names omit LLVM's '%' or '@' sigil.
-struct AllocaPointer {
-  std::string allocaSite;
-};
-
-struct GlobalPointer {
-  std::string globalName;
-};
-
-using Pointer = std::variant<AllocaPointer, GlobalPointer>;
 
 // Integer constants are stored as decimal text so the representation is not
 // limited to the host machine's integer width. Their type comes from the

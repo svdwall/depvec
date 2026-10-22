@@ -11,11 +11,21 @@ namespace {
 ExpressionPtr makeInteger(std::int64_t value) {
   return std::make_shared<Expression>(Expression{IntegerLiteral{value}});
 }
-ExpressionPtr makeVariable(std::string name) {
-  return std::make_shared<Expression>(Expression{Variable{std::move(name)}});
+ExpressionPtr makeVariable(ValueRef value) {
+  return std::make_shared<Expression>(Expression{Variable{std::move(value)}});
 }
-ExpressionPtr makeDereference(std::string name) {
-  return std::make_shared<Expression>(Expression{Dereference{std::move(name)}});
+ExpressionPtr makeDereference(Pointer pointer) {
+  return std::make_shared<Expression>(Expression{Dereference{std::move(pointer)}});
+}
+std::string withoutSigil(std::string name) {
+  if (!name.empty() && (name.front() == '%' || name.front() == '@'))
+    name.erase(name.begin());
+  return name;
+}
+Pointer makePointer(std::string name, bool global) {
+  name = withoutSigil(std::move(name));
+  if (global) return GlobalPointer{std::move(name)};
+  return AllocaPointer{std::move(name)};
 }
 ExpressionPtr makeUnary(ArithmeticUnaryOperator op, ExpressionPtr operand) {
   return std::make_shared<Expression>(Expression{
@@ -112,10 +122,11 @@ antlrcpp::Any AssertionAstBuilder::visitFormulaPrimary(
 
 antlrcpp::Any AssertionAstBuilder::visitPointsTo(
     DepVecAssertionParser::PointsToContext *context) {
-  const std::string pointerName = context->AllocaIdentifier()
-      ? "%" + context->AllocaIdentifier()->getText()
-      : context->GlobalIdentifier()->getText();
-  ExpressionPtr location = makeDereference(pointerName);
+  const bool global = context->GlobalIdentifier() != nullptr;
+  const std::string pointerName = global
+      ? context->GlobalIdentifier()->getText()
+      : context->AllocaIdentifier()->getText();
+  ExpressionPtr location = makeDereference(makePointer(pointerName, global));
   ExpressionPtr value = as<ExpressionPtr>(visit(context->additive()));
   return makeComparison(ComparisonOperator::Equal, std::move(location),
                         std::move(value));
@@ -185,13 +196,13 @@ antlrcpp::Any AssertionAstBuilder::visitPrimary(
     return makeInteger(std::stoll(context->Integer()->getText()));
   if (context->STAR()) {
     if (context->GlobalIdentifier())
-      return makeDereference(context->GlobalIdentifier()->getText());
-    return makeDereference(context->LocalIdentifier()->getText());
+      return makeDereference(makePointer(context->GlobalIdentifier()->getText(), true));
+    return makeDereference(makePointer(context->LocalIdentifier()->getText(), false));
   }
   if (context->GlobalIdentifier())
-    return makeVariable(context->GlobalIdentifier()->getText());
+    return makeVariable(ValueRef{withoutSigil(context->GlobalIdentifier()->getText())});
   if (context->LocalIdentifier())
-    return makeVariable(context->LocalIdentifier()->getText());
+    return makeVariable(ValueRef{withoutSigil(context->LocalIdentifier()->getText())});
   return visit(context->additive());
 }
 

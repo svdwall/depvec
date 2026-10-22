@@ -8,6 +8,8 @@
 #include <utility>
 #include <variant>
 
+#include "depvec/ir_reference.hpp"
+
 namespace depvec {
 
 struct Expression;
@@ -16,8 +18,8 @@ using ExpressionPtr = std::shared_ptr<Expression>;
 using FormulaPtr = std::shared_ptr<Formula>;
 
 struct IntegerLiteral { std::int64_t value; };
-struct Variable { std::string name; };
-struct Dereference { std::string name; };
+struct Variable { ValueRef value; };
+struct Dereference { Pointer pointer; };
 
 enum class ArithmeticUnaryOperator { Negate };
 enum class ArithmeticBinaryOperator { Add, Subtract, Multiply, Divide };

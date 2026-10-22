@@ -16,9 +16,17 @@ std::string formatExpression(const depvec::Expression &expression) {
         if constexpr (std::is_same_v<Node, depvec::IntegerLiteral>) {
           return std::to_string(node.value);
         } else if constexpr (std::is_same_v<Node, depvec::Variable>) {
-          return node.name;
+          return "%" + node.value.name;
         } else if constexpr (std::is_same_v<Node, depvec::Dereference>) {
-          return "(* " + node.name + ")";
+          return std::visit(
+              [](const auto &pointer) {
+                using Pointer = std::decay_t<decltype(pointer)>;
+                if constexpr (std::is_same_v<Pointer, depvec::AllocaPointer>)
+                  return "(* %" + pointer.allocaSite + ")";
+                else
+                  return "(* @" + pointer.globalName + ")";
+              },
+              node.pointer);
         } else if constexpr (std::is_same_v<Node, depvec::ArithmeticUnaryExpression>) {
           return "(" + std::string(depvec::operatorText(node.op)) + " " +
                  formatExpression(*node.operand) + ")";
