@@ -1,12 +1,14 @@
 #include "DependencyGraphAnalysis.h"
 
 #include "DataDependencyAnalysis.h"
+#include "ControlDependencyAnalysis.h"
 #include "MemoryOrderAnalysis.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #include <cassert>
@@ -51,6 +53,8 @@ DependencyGraphAnalysis::run(llvm::Function &F,
                              F.getName() + "'");
 
   const llvm::DominatorTree &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(F);
+  const llvm::PostDominatorTree &PDT =
+      FAM.getResult<llvm::PostDominatorTreeAnalysis>(F);
   Graph.edges = std::vector<DependencyGraph::DependencyEdge>();
   std::vector<DependencyGraph::DependencyEdge> DataEdges =
       DataDependencyAnalysis::run(Graph);
@@ -58,6 +62,9 @@ DependencyGraphAnalysis::run(llvm::Function &F,
   std::vector<DependencyGraph::DependencyEdge> MemoryEdges =
       MemoryOrderAnalysis::run(Graph, DT);
   Graph.edges.insert(Graph.edges.end(), MemoryEdges.begin(), MemoryEdges.end());
+  std::vector<DependencyGraph::DependencyEdge> ControlEdges =
+      ControlDependencyAnalysis::run(Graph, DT, PDT);
+  Graph.edges.insert(Graph.edges.end(), ControlEdges.begin(), ControlEdges.end());
   return Graph;
 }
 

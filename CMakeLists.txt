@@ -7,7 +7,9 @@ include(AddLLVM)
 
 add_llvm_pass_plugin(DepVecPass
   src/DepVecPass.cpp
+  src/GraphSerialization.cpp
   src/DependencyGraphAnalysis.cpp
+  src/ControlDependencyAnalysis.cpp
   src/DataDependencyAnalysis.cpp
   src/MemoryOrderAnalysis.cpp
 )

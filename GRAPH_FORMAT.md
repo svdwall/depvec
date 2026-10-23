@@ -74,11 +74,21 @@ node.
 | `sources` | integer array | Source node IDs. |
 | `target` | integer | Target node ID. |
 | `kind` | string | Dependency category, such as data or memory dependency. |
-| `values` | string array | SSA values associated with the dependency; empty when none apply. |
+| `values` | string array | SSA values associated with the dependency, or branch-arm markers on control edges. |
 | `assertion` | string | Assertion label for the edge. Currently emitted as an empty string. |
 
 The backend parses a non-empty `assertion` string into a formula. An empty
 string means the formula `true`, so the edge adds no assertion constraint.
+
+Control edges leaving a conditional branch node carry either
+`"true-branch"` or `"false-branch"` in `values`, according to the LLVM
+successor index. The extractor creates these edges only for branches with two
+successors. The backend treats `br` operations as branch nodes and forms their separate
+true and false postconditions by conjoining assertions on control edges marked
+for each arm. The extractor emits direct edges to each branch successor, then
+propagates arm-labeled control edges through successor blocks while those blocks
+are dominated by the branch, stopping at blocks that post-dominate the branch.
+Edges leaving a branch node must be control edges.
 
 ## Example
 
