@@ -1,1 +1,0 @@
-%n > 0 && buf |-> 42 -> @shared_value |-> 42
