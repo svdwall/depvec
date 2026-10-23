@@ -2,7 +2,7 @@
 
 EXAMPLE_C_SOURCES := $(wildcard examples/*.c)
 EXAMPLE_LL_FILES := $(patsubst %.c,%.ll,$(EXAMPLE_C_SOURCES))
-SOURCE_CPP_FILES := $(wildcard src/*.cpp)
+SOURCE_CPP_FILES := $(wildcard src/extractor/*.cpp)
 
 # Compile one C source to optimized textual LLVM IR without loading DepVec.
 # Usage: make compile-ir SOURCE=examples/def_use_independent.c
@@ -22,14 +22,14 @@ build-pass:
 
 # Configure and build the standalone backend in the Nix development shell.
 build-backend:
-	nix develop --command cmake -S backend -B backend/build
-	nix develop --command cmake --build backend/build -j4
+	nix develop --command cmake -S src/backend -B src/backend/build
+	nix develop --command cmake --build src/backend/build -j4
 
 # Parse a v2 graph JSON file with the backend reader.
 # Usage: make parse-graph GRAPH=depvec-graphs.json
 parse-graph: build-backend
 	@test -n "$(GRAPH)" || (echo "Set GRAPH=path/to/graph.json" >&2; exit 1)
-	backend/build/depvec-graph-parse "$(GRAPH)"
+	src/backend/build/depvec-graph-parse "$(GRAPH)"
 
 nix-build: build-pass
 

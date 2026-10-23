@@ -6,12 +6,12 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
 
 add_llvm_pass_plugin(DepVecPass
-  src/DepVecPass.cpp
-  src/GraphSerialization.cpp
-  src/DependencyGraphAnalysis.cpp
-  src/ControlDependencyAnalysis.cpp
-  src/DataDependencyAnalysis.cpp
-  src/MemoryOrderAnalysis.cpp
+  src/extractor/DepVecPass.cpp
+  src/extractor/GraphSerialization.cpp
+  src/extractor/DependencyGraphAnalysis.cpp
+  src/extractor/ControlDependencyAnalysis.cpp
+  src/extractor/DataDependencyAnalysis.cpp
+  src/extractor/MemoryOrderAnalysis.cpp
 )
 foreach(LLVM_INCLUDE_DIR IN LISTS LLVM_INCLUDE_DIRS)
   target_compile_options(DepVecPass PRIVATE "-isystem${LLVM_INCLUDE_DIR}")

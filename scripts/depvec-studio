@@ -17,7 +17,7 @@ import webbrowser
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FRONTEND = ROOT / "frontend"
+FRONTEND = ROOT / "src" / "frontend"
 
 
 def parse_args() -> argparse.Namespace:
