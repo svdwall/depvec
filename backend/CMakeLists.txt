@@ -23,6 +23,7 @@ set(BACKEND_SOURCES
   AssertionParser.cpp
   AssertionAstBuilder.cpp
   GraphJsonReader.cpp
+  WeakestPrecondition.cpp
 )
 
 add_custom_command(
@@ -48,6 +49,9 @@ target_include_directories(DepVecBackend
 target_link_libraries(DepVecBackend
   PUBLIC antlr4_shared nlohmann_json::nlohmann_json
 )
+
+add_executable(depvec depvec.cpp)
+target_link_libraries(depvec PRIVATE DepVecBackend)
 
 add_executable(depvec-assertion-parse parse_assertion.cpp)
 target_link_libraries(depvec-assertion-parse PRIVATE DepVecBackend)

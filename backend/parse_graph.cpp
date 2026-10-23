@@ -10,14 +10,14 @@ int main(int argc, char **argv) {
   }
 
   try {
-    const depvec::Graph graph = depvec::readGraphFile(argv[1]);
+    const depvec::DFG dfg = depvec::readGraphFile(argv[1]);
     std::size_t nodeCount = 0;
     std::size_t edgeCount = 0;
-    for (const depvec::FunctionGraph &function : graph.functions) {
+    for (const depvec::FunctionDFG &function : dfg.functions) {
       nodeCount += function.nodes.size();
       edgeCount += function.edges.size();
     }
-    std::cout << "Parsed " << graph.functions.size() << " functions, "
+    std::cout << "Parsed " << dfg.functions.size() << " functions, "
               << nodeCount << " nodes, and " << edgeCount << " edges from "
               << argv[1] << '\n';
   } catch (const std::exception &error) {

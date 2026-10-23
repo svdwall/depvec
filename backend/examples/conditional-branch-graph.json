@@ -1,0 +1,112 @@
+{
+  "format": "depvec-graph-v2",
+  "module": "conditional-branch.ll",
+  "functions": [
+    {
+      "name": "conditional_example",
+      "ir": "define void @conditional_example(i32 %x) {\nentry:\n  %cmp = icmp sgt i32 %x, 0\n  br i1 %cmp, label %then, label %else\nthen:\n  %then.value = add i32 %x, 1\n  br label %exit\nelse:\n  %else.value = sub i32 %x, 1\n  br label %exit\nexit:\n  ret void\n}",
+      "nodes": [
+        { "id": 0, "kind": "init", "line": 0, "instruction": "" },
+        {
+          "id": 1,
+          "kind": "instruction",
+          "line": 2,
+          "instruction": "%cmp = icmp sgt i32 %x, 0",
+          "operation": {
+            "opcode": "icmp",
+            "result": "cmp",
+            "predicate": "sgt",
+            "left": { "kind": "ref", "name": "x" },
+            "right": { "kind": "integer", "value": "0" },
+            "operandType": 32
+          }
+        },
+        {
+          "id": 2,
+          "kind": "instruction",
+          "line": 3,
+          "instruction": "br i1 %cmp, label %then, label %else",
+          "operation": {
+            "opcode": "br",
+            "condition": { "kind": "ref", "name": "cmp" },
+            "target": "then",
+            "falseTarget": "else"
+          }
+        },
+        {
+          "id": 3,
+          "kind": "instruction",
+          "line": 5,
+          "instruction": "%then.value = add i32 %x, 1",
+          "operation": {
+            "opcode": "add",
+            "result": "then.value",
+            "type": 32,
+            "left": { "kind": "ref", "name": "x" },
+            "right": { "kind": "integer", "value": "1" },
+            "nsw": false,
+            "nuw": false
+          }
+        },
+        {
+          "id": 4,
+          "kind": "instruction",
+          "line": 7,
+          "instruction": "%else.value = sub i32 %x, 1",
+          "operation": {
+            "opcode": "sub",
+            "result": "else.value",
+            "type": 32,
+            "left": { "kind": "ref", "name": "x" },
+            "right": { "kind": "integer", "value": "1" },
+            "nsw": false,
+            "nuw": false
+          }
+        },
+        { "id": 5, "kind": "exit", "line": 10, "instruction": "ret void" }
+      ],
+      "edges": [
+        {
+          "id": "e0",
+          "sources": [1],
+          "target": 2,
+          "kind": "data",
+          "values": ["%cmp"],
+          "assertion": ""
+        },
+        {
+          "id": "e1",
+          "sources": [2],
+          "target": 3,
+          "kind": "control",
+          "values": ["true-branch"],
+          "assertion": "%x > 0"
+        },
+        {
+          "id": "e2",
+          "sources": [2],
+          "target": 4,
+          "kind": "control",
+          "values": ["false-branch"],
+          "assertion": "%x <= 0"
+        },
+        {
+          "id": "e3",
+          "sources": [3],
+          "target": 5,
+          "kind": "control",
+          "values": [],
+          "assertion": ""
+        },
+        {
+          "id": "e4",
+          "sources": [4],
+          "target": 5,
+          "kind": "control",
+          "values": [],
+          "assertion": ""
+        }
+      ]
+    }
+  ]
+}

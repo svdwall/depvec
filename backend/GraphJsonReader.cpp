@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -38,11 +39,18 @@ void collectPointer(const Pointer &pointer, InstructionReferences &references) {
   }, pointer);
 }
 
-InstructionReferences collectInstructionReferences(const FunctionGraph &function) {
+InstructionReferences collectInstructionReferences(const FunctionDFG &function) {
   InstructionReferences references;
   for (const GraphNode &graphNode : function.nodes) {
-    const auto *node = std::get_if<InstructionNode>(&graphNode);
-    if (!node) continue;
+    const Instruction *instruction = nullptr;
+    if (const auto *node = std::get_if<InstructionNode>(&graphNode))
+      instruction = &node->instruction;
+    else if (const auto *branch = std::get_if<BranchNode>(&graphNode)) {
+      if (branch->instruction.condition)
+        collectValue(*branch->instruction.condition, references);
+      continue;
+    }
+    if (!instruction) continue;
     std::visit([&](const auto &instruction) {
       using Op = std::decay_t<decltype(instruction)>;
       if constexpr (std::is_same_v<Op, IntegerBinaryInstruction>) {
@@ -78,7 +86,7 @@ InstructionReferences collectInstructionReferences(const FunctionGraph &function
         for (const PhiIncoming &incoming : instruction.incoming)
           collectValue(incoming.value, references);
       }
-    }, node->instruction.node);
+    }, instruction->node);
   }
   return references;
 }
@@ -392,10 +400,11 @@ GraphNode parseNode(const Json &value, const std::string &functionName) {
   const auto instructionText = stringField(value, "instruction", context);
   if (kind == "instruction") {
     const std::string instructionContext = context + " " + std::to_string(id);
-    return InstructionNode{
-        id, line, instructionText,
-        parseInstruction(field(value, "operation", instructionContext),
-                         instructionContext)};
+    Instruction parsed = parseInstruction(
+        field(value, "operation", instructionContext), instructionContext);
+    if (const auto *branch = std::get_if<BranchInstruction>(&parsed.node))
+      return BranchNode{id, line, instructionText, *branch};
+    return InstructionNode{id, line, instructionText, std::move(parsed)};
   }
   if (value.contains("operation"))
     throw std::runtime_error(context + ": init and exit nodes cannot have an operation");
@@ -404,9 +413,9 @@ GraphNode parseNode(const Json &value, const std::string &functionName) {
   throw std::runtime_error(context + ": unknown node kind '" + kind + "'");
 }
 
-GraphEdge parseEdge(const Json &value, const std::string &functionName) {
+DependencyEdge parseEdge(const Json &value, const std::string &functionName) {
   const std::string context = "function '" + functionName + "' edge";
-  GraphEdge edge;
+  DependencyEdge edge;
   edge.id = stringField(value, "id", context);
   const Json &sources = field(value, "sources", context);
   if (!sources.is_array())
@@ -449,8 +458,48 @@ GraphEdge parseEdge(const Json &value, const std::string &functionName) {
   return edge;
 }
 
-FunctionGraph parseFunction(const Json &value) {
-  FunctionGraph function;
+FormulaPtr conjunctionOfAssertions(const FunctionDFG &function,
+                                  NodeId nodeId, bool incoming) {
+  FormulaPtr result =
+      std::make_shared<Formula>(Formula{BooleanLiteral{true}});
+  for (const DependencyEdge &edge : function.edges) {
+    const bool connected = incoming
+        ? edge.target == nodeId
+        : std::find(edge.sources.begin(), edge.sources.end(), nodeId) !=
+              edge.sources.end();
+    if (!connected)
+      continue;
+    const FormulaPtr assertion = edge.assertion
+        ? edge.assertion
+        : std::make_shared<Formula>(Formula{BooleanLiteral{true}});
+    result = std::make_shared<Formula>(Formula{LogicalFormula{
+        LogicalOperator::And, std::move(result), assertion}});
+  }
+  return result;
+}
+
+FormulaPtr conjunctionOfBranchAssertions(const FunctionDFG &function,
+                                         NodeId nodeId,
+                                         const std::string &branchValue) {
+  FormulaPtr result =
+      std::make_shared<Formula>(Formula{BooleanLiteral{true}});
+  for (const DependencyEdge &edge : function.edges) {
+    if (std::find(edge.sources.begin(), edge.sources.end(), nodeId) ==
+            edge.sources.end() ||
+        std::find(edge.values.begin(), edge.values.end(), branchValue) ==
+            edge.values.end())
+      continue;
+    const FormulaPtr assertion = edge.assertion
+        ? edge.assertion
+        : std::make_shared<Formula>(Formula{BooleanLiteral{true}});
+    result = std::make_shared<Formula>(Formula{LogicalFormula{
+        LogicalOperator::And, std::move(result), assertion}});
+  }
+  return result;
+}
+
+FunctionDFG parseFunction(const Json &value) {
+  FunctionDFG function;
   function.name = stringField(value, "name", "function");
   function.ir = stringField(value, "ir", "function '" + function.name + "'");
   const Json &nodes = field(value, "nodes", "function '" + function.name + "'");
@@ -507,7 +556,7 @@ FunctionGraph parseFunction(const Json &value) {
 
   std::unordered_set<std::string> edgeIds;
   for (const Json &edgeValue : edges) {
-    GraphEdge edge = parseEdge(edgeValue, function.name);
+    DependencyEdge edge = parseEdge(edgeValue, function.name);
     validateFormulaReferences(
         *edge.assertion, instructionReferences,
         "function '" + function.name + "' edge '" + edge.id + "' assertion");
@@ -526,12 +575,58 @@ FunctionGraph parseFunction(const Json &value) {
     }
     function.edges.push_back(std::move(edge));
   }
+
+  for (GraphNode &node : function.nodes) {
+    std::visit([&](auto &nodeData) {
+      nodeData.precondition = conjunctionOfAssertions(function, nodeData.id, true);
+      if constexpr (std::is_same_v<std::decay_t<decltype(nodeData)>, BranchNode>) {
+        for (const DependencyEdge &edge : function.edges) {
+          if (std::find(edge.sources.begin(), edge.sources.end(), nodeData.id) ==
+              edge.sources.end())
+            continue;
+          if (edge.kind != "control")
+            throw std::runtime_error("function '" + function.name +
+                "' branch node " + std::to_string(nodeData.id) +
+                ": outgoing edges must be control edges");
+          const bool isTrueBranch = std::find(
+              edge.values.begin(), edge.values.end(), TrueBranchValue) !=
+              edge.values.end();
+          const bool isFalseBranch = std::find(
+              edge.values.begin(), edge.values.end(), FalseBranchValue) !=
+              edge.values.end();
+          const bool isUnconditionalBranch = std::find(
+              edge.values.begin(), edge.values.end(),
+              UnconditionalBranchValue) != edge.values.end();
+          const bool hasValidBranchValue = nodeData.instruction.condition
+              ? (isTrueBranch != isFalseBranch && !isUnconditionalBranch)
+              : (isUnconditionalBranch && !isTrueBranch && !isFalseBranch);
+          if (!hasValidBranchValue)
+            throw std::runtime_error("function '" + function.name +
+                "' branch node " + std::to_string(nodeData.id) +
+                ": outgoing control edge must identify exactly one branch arm");
+        }
+        if (nodeData.instruction.condition) {
+          nodeData.true_postcondition = conjunctionOfBranchAssertions(
+              function, nodeData.id, TrueBranchValue);
+          nodeData.false_postcondition = conjunctionOfBranchAssertions(
+              function, nodeData.id, FalseBranchValue);
+        } else {
+          nodeData.true_postcondition = conjunctionOfBranchAssertions(
+              function, nodeData.id, UnconditionalBranchValue);
+          nodeData.false_postcondition =
+              std::make_shared<Formula>(Formula{BooleanLiteral{true}});
+        }
+      } else {
+        nodeData.postcondition = conjunctionOfAssertions(function, nodeData.id, false);
+      }
+    }, node);
+  }
   return function;
 }
 
 } // namespace
 
-Graph readGraphJson(std::string_view jsonText) {
+DFG readGraphJson(std::string_view jsonText) {
   Json document;
   try {
     document = Json::parse(jsonText.begin(), jsonText.end());
@@ -541,17 +636,17 @@ Graph readGraphJson(std::string_view jsonText) {
   if (stringField(document, "format", "graph") != "depvec-graph-v2")
     throw std::runtime_error("graph format must be 'depvec-graph-v2'");
 
-  Graph graph;
-  graph.module = stringField(document, "module", "graph");
+  DFG dfg;
+  dfg.module = stringField(document, "module", "graph");
   const Json &functions = field(document, "functions", "graph");
   if (!functions.is_array())
     throw std::runtime_error("graph: functions must be an array");
   for (const Json &functionValue : functions)
-    graph.functions.push_back(parseFunction(functionValue));
-  return graph;
+    dfg.functions.push_back(parseFunction(functionValue));
+  return dfg;
 }
 
-Graph readGraphFile(const std::string &path) {
+DFG readGraphFile(const std::string &path) {
   std::ifstream input(path);
   if (!input)
     throw std::runtime_error("could not open graph file '" + path + "'");
