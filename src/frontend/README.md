@@ -7,14 +7,17 @@ the app only on localhost.
 
 ## Create a graph export
 
-From the repository root, run:
+From the repository root, first compile the C examples to LLVM IR under
+`build/examples/ir`, then export a graph:
 
 ```sh
-make graphs IR=examples/message_passing.ll
+make compile-examples
+make graphs IR=build/examples/ir/message_passing.ll
 ```
 
 This writes `depvec-graphs.json` in the repository root. Choose that JSON file
-and the matching `.ll` file in `index.html` (open the HTML file in a browser).
+and the matching `.ll` file in `src/frontend/index.html` (open the HTML file in
+a browser).
 The graph export contains one graph for each function marked with the `depvec`
 annotation, along with the LLVM-printed function text and instruction line
 anchors used to draw the overlays.
@@ -22,7 +25,7 @@ anchors used to draw the overlays.
 To use a different output path:
 
 ```sh
-make graphs IR=examples/message_passing.ll OUT=/tmp/message-passing-graphs.json
+make graphs IR=build/examples/ir/message_passing.ll OUT=/tmp/message-passing-graphs.json
 ```
 
 ## Launch directly from the command line
@@ -31,7 +34,7 @@ The launcher builds the plugin, runs it on the selected module, starts a local
 web server for the app and its inputs, then opens the workspace in your browser:
 
 ```sh
-./scripts/depvec-studio examples/message_passing.ll
+./scripts/depvec-studio build/examples/ir/message_passing.ll
 ```
 
 It binds only to `127.0.0.1` and serves only the frontend, the selected IR file,

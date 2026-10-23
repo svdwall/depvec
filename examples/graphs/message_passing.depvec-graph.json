@@ -211,5 +211,5 @@
       ]
     }
   ],
-  "module": "/Users/soren/Documents/projects/depvec/examples/message_passing.ll"
+  "module": "message_passing.ll"
 }
