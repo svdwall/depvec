@@ -13,6 +13,19 @@ namespace depvec {
 
 using NodeId = std::uint64_t;
 
+enum class VerificationStatus {
+  NotChecked,
+  Proved,
+  Counterexample,
+  Unknown,
+  Error
+};
+
+struct VerificationResult {
+  VerificationStatus status = VerificationStatus::NotChecked;
+  std::string detail;
+};
+
 // Conditions are derived by the graph reader after all edges are parsed:
 // precondition is the conjunction of incoming edge assertions; ordinary node
 // postcondition is the conjunction of outgoing edge assertions. Branch nodes
@@ -25,6 +38,7 @@ struct InitNode {
   FormulaPtr postcondition;
   FormulaPtr weakest_precondition;
   std::string weakest_precondition_status;
+  VerificationResult verification;
 };
 
 struct InstructionNode {
@@ -36,6 +50,7 @@ struct InstructionNode {
   FormulaPtr postcondition;
   FormulaPtr weakest_precondition;
   std::string weakest_precondition_status;
+  VerificationResult verification;
 };
 
 struct BranchNode {
@@ -48,6 +63,7 @@ struct BranchNode {
   FormulaPtr false_postcondition;
   FormulaPtr weakest_precondition;
   std::string weakest_precondition_status;
+  VerificationResult verification;
 };
 
 struct ExitNode {
@@ -58,6 +74,7 @@ struct ExitNode {
   FormulaPtr postcondition;
   FormulaPtr weakest_precondition;
   std::string weakest_precondition_status;
+  VerificationResult verification;
 };
 
 using GraphNode = std::variant<InitNode, InstructionNode, BranchNode, ExitNode>;

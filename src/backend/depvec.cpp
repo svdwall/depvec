@@ -1,6 +1,9 @@
 #include "depvec/weakest_precondition.hpp"
+#include "depvec/verification_conditions.hpp"
 
 #include "depvec/graph_json_reader.hpp"
+#include "smtlib_solver.hpp"
+#include "z3_smtlib_engine.hpp"
 
 #include <exception>
 #include <iostream>
@@ -72,7 +75,12 @@ int main(int argc, char **argv) {
     depvec::DFG dfg = depvec::readGraphFile(argv[1]);
     depvec::generateWeakestPreconditions(dfg);
     std::cout << "DFG module: " << dfg.module << '\n';
-    for (const auto &function : dfg.functions) {
+    for (auto &function : dfg.functions) {
+      depvec::Z3SmtLibEngine solverEngine;
+      depvec::SmtLibSolver solver(depvec::verificationSymbols(function),
+                                  solverEngine);
+      depvec::checkVerificationConditions(function, solver);
+
       std::cout << "\nFunction: " << function.name << "\nLLVM IR:\n"
                 << function.ir << "\nNodes:\n";
       for (const auto &graphNode : function.nodes) {
@@ -105,6 +113,11 @@ int main(int argc, char **argv) {
             std::cout << formatFormula(node.weakest_precondition);
           else
             std::cout << '<' << node.weakest_precondition_status << '>';
+          std::cout << '\n';
+          std::cout << "    verification: "
+                    << depvec::verificationStatusText(node.verification.status);
+          if (!node.verification.detail.empty())
+            std::cout << " (" << node.verification.detail << ')';
           std::cout << '\n';
         }, graphNode);
       }

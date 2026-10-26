@@ -23,6 +23,7 @@ set(BACKEND_SOURCES
   AssertionParser.cpp
   AssertionAstBuilder.cpp
   GraphJsonReader.cpp
+  VerificationConditions.cpp
   solver/SmtLibSolver.cpp
   WeakestPrecondition.cpp
   solver/Z3SmtLibEngine.cpp
@@ -53,6 +54,7 @@ target_link_libraries(DepVecBackend
 )
 
 add_executable(depvec depvec.cpp)
+target_include_directories(depvec PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/solver")
 target_link_libraries(depvec PRIVATE DepVecBackend)
 
 add_executable(depvec-assertion-parse parse_assertion.cpp)
