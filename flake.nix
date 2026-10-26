@@ -27,6 +27,8 @@
         antlr4
         antlr4.runtime.cpp
         nlohmann_json
+        catch2_3
+        z3
         llvmPackages_22.clang
         llvmPackages_22.clang-tools
         llvmPackages_22.libllvm
@@ -35,7 +37,8 @@
       ];
 
       shellHook = ''
-        export CLANGD_FLAGS="--query-driver=$(command -v clang++)"
+        export DEPVEC_CXX_COMPILER="${llvmPackages_22.clang}/bin/clang++"
+        export CLANGD_FLAGS="--query-driver=${llvmPackages_22.clang}/bin/clang++"
         export DEPVEC_CXX_INCLUDE="${llvmPackages_22.libcxx.dev}/include/c++/v1"
       '';
     };

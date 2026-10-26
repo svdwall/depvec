@@ -1,4 +1,4 @@
-.PHONY: compile-ir compile-examples build-pass build-backend parse-graph nix-build pass graphs lint lint-examples lint-all
+.PHONY: compile-ir compile-examples build-pass build-backend test-backend parse-graph nix-build pass graphs lint lint-examples lint-all
 
 EXAMPLE_PROGRAMS_DIR := examples/programs
 EXAMPLE_IR_DIR := build/examples/ir
@@ -7,7 +7,7 @@ EXAMPLE_LL_FILES := $(patsubst $(EXAMPLE_PROGRAMS_DIR)/%.c,$(EXAMPLE_IR_DIR)/%.l
 SOURCE_CPP_FILES := $(wildcard src/extractor/*.cpp)
 EXTRACTOR_BUILD_DIR := build/extractor
 EXTRACTOR_PACKAGE := $(EXTRACTOR_BUILD_DIR)/nix
-BACKEND_BUILD_DIR := build/backend
+BACKEND_BUILD_DIR := build/backend-nix
 
 # Compile one C source to optimized textual LLVM IR without loading DepVec.
 # Usage: make compile-ir SOURCE=examples/programs/def_use_independent.c
@@ -30,8 +30,12 @@ build-pass:
 
 # Configure and build the standalone backend in the Nix development shell.
 build-backend:
-	nix develop --command cmake -S src/backend -B $(BACKEND_BUILD_DIR)
+	nix develop --command sh -c 'cmake -S src/backend -B $(BACKEND_BUILD_DIR) -DCMAKE_CXX_COMPILER="$$DEPVEC_CXX_COMPILER" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'
 	nix develop --command cmake --build $(BACKEND_BUILD_DIR) -j4
+
+# Build and run the standalone backend tests.
+test-backend: build-backend
+	nix develop --command ctest --test-dir $(BACKEND_BUILD_DIR) --output-on-failure
 
 # Parse a v2 graph JSON file with the backend reader.
 # Usage: make parse-graph GRAPH=examples/graphs/minimal-graph.json

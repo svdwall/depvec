@@ -23,7 +23,9 @@ set(BACKEND_SOURCES
   AssertionParser.cpp
   AssertionAstBuilder.cpp
   GraphJsonReader.cpp
+  solver/SmtLibSolver.cpp
   WeakestPrecondition.cpp
+  solver/Z3SmtLibEngine.cpp
 )
 
 add_custom_command(
@@ -58,3 +60,10 @@ target_link_libraries(depvec-assertion-parse PRIVATE DepVecBackend)
 
 add_executable(depvec-graph-parse parse_graph.cpp)
 target_link_libraries(depvec-graph-parse PRIVATE DepVecBackend)
+
+include(CTest)
+if(BUILD_TESTING)
+  find_package(Catch2 3 CONFIG REQUIRED)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../test/backend"
+                   "${CMAKE_CURRENT_BINARY_DIR}/test/backend")
+endif()
