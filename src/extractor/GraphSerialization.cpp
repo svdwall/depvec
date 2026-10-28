@@ -273,6 +273,8 @@ json::Object serializeFunction(const Function &F,
   raw_string_ostream FunctionOS(FunctionIR);
   F.print(FunctionOS);
   FunctionOS.flush();
+  if (!FunctionIR.empty() && FunctionIR.back() == '\n')
+    FunctionIR.pop_back();
   const std::vector<std::string> IRLines = getFunctionIRLines(F);
 
   json::Array Nodes;
@@ -335,6 +337,26 @@ json::Object serializeFunction(const Function &F,
   return Result;
 }
 
+json::Object serializeGlobalInitialValues(const Module &M) {
+  json::Object Values;
+  for (const GlobalVariable &Global : M.globals()) {
+    if (!Global.hasInitializer() || !Global.getValueType()->isIntegerTy())
+      continue;
+    const auto *Initializer = dyn_cast<ConstantInt>(Global.getInitializer());
+    if (!Initializer)
+      continue;
+
+    SmallString<32> Text;
+    if (Initializer->getType()->isIntegerTy(1))
+      Text.append(Initializer->isZero() ? StringRef("false")
+                                        : StringRef("true"));
+    else
+      Initializer->getValue().toString(Text, 10, true);
+    Values[(Twine("@") + Global.getName()).str()] = Text.str().str();
+  }
+  return Values;
+}
+
 bool writeGraphJSON(const Module &M, std::vector<json::Object> Functions, StringRef Path) {
   std::error_code EC;
   raw_fd_ostream OS(Path, EC, sys::fs::OF_Text);
@@ -349,6 +371,9 @@ bool writeGraphJSON(const Module &M, std::vector<json::Object> Functions, String
     SerializedFunctions.push_back(std::move(Function));
   json::Object Root;
   Root["format"] = "depvec-graph-v2";
+  Root["precondition"] = "";
+  Root["postcondition"] = "";
+  Root["globalInitialValues"] = serializeGlobalInitialValues(M);
   Root["module"] = M.getModuleIdentifier();
   Root["functions"] = std::move(SerializedFunctions);
   OS << formatv("{0:2}\n", json::Value(std::move(Root)));

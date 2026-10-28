@@ -1,10 +1,16 @@
 {
   "format": "depvec-graph-v2",
+  "precondition": "",
+  "postcondition": "",
+  "globalInitialValues": {
+    "@shared_value": "0",
+    "@ready": "0"
+  },
   "functions": [
     {
       "edges": [
         {
-          "assertion": "@shared_value |-> 42",
+          "assertion": "",
           "id": "e0",
           "kind": "memory (release)",
           "sources": [
@@ -114,6 +120,30 @@
           ],
           "target": 5,
           "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e4",
+          "kind": "control",
+          "sources": [
+            4
+          ],
+          "target": 2,
+          "values": [
+            "true-branch"
+          ]
+        },
+        {
+          "assertion": "",
+          "id": "e5",
+          "kind": "control",
+          "sources": [
+            4
+          ],
+          "target": 5,
+          "values": [
+            "false-branch"
+          ]
         }
       ],
       "ir": "; Function Attrs: nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine i32 @message_passing_reader() #1 {\nentry:\n  br label %while.cond\n\nwhile.cond:                                       ; preds = %while.cond, %entry\n  %0 = load atomic i32, ptr @ready acquire, align 4\n  %cmp = icmp eq i32 %0, 0\n  br i1 %cmp, label %while.cond, label %while.end, !llvm.loop !10\n\nwhile.end:                                        ; preds = %while.cond\n  %1 = load atomic i32, ptr @shared_value monotonic, align 4\n  ret i32 %1\n}\n",

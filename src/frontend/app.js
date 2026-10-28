@@ -1,14 +1,50 @@
 const $ = (selector) => document.querySelector(selector);
 const NS = 'http://www.w3.org/2000/svg';
-const EDGE_LABEL_MAX_WIDTH = 180;
+const EDGE_LABEL_MAX_WIDTH = 280;
 const EDGE_LANE_SPACING = 16;
 const EDGE_TRACK_LABEL_GAP = 8;
-const EDGE_ENDPOINT_SPACING = 2;
+const EDGE_ENDPOINT_SPACING = 5;
+const EDGE_ENDPOINT_BASE_SPACING = 8;
 
-function edgeLabelWidth(kind, assertion) {
-  const kindWidth = Math.min(72, String(kind || 'dependency').length * 6.1);
-  const assertionWidth = Math.max(38, (String(assertion || '').length + 4) * 6.1);
-  return Math.min(EDGE_LABEL_MAX_WIDTH, 14 + kindWidth + 8 + assertionWidth);
+function edgeLabelWidth(kind, assertion, showKind, showAssertion) {
+  const kindWidth = showKind ? Math.min(72, String(kind || 'dependency').length * 6.1) + 8 : 0;
+  const assertionWidth = showAssertion ? Math.max(38, String(assertion || '').length * 6.1) : 0;
+  return Math.min(EDGE_LABEL_MAX_WIDTH, 14 + kindWidth + assertionWidth);
+}
+
+function findIRVariables(ir) {
+  const variables = new Set();
+  const variablePattern = /[%@](?:[A-Za-z_][A-Za-z_0-9.]*|[0-9]+)/g;
+  for (const match of String(ir ?? '').matchAll(variablePattern)) variables.add(match[0]);
+  return variables;
+}
+
+function appendHighlightedAssertion(container, assertion, irVariables) {
+  const text = String(assertion ?? '');
+  const tokenPattern = /\s+|\|->|->|&&|\|\||!=|<=|>=|\b(?:true|false)\b|%[A-Za-z_][A-Za-z_0-9.]*|%[0-9]+|@[A-Za-z_][A-Za-z_0-9.]*|@[0-9]+|[0-9]+|[A-Za-z_][A-Za-z_0-9.]*|[=<>+*/!()-]|[{}]|./gy;
+  let index = 0;
+  while (index < text.length) {
+    tokenPattern.lastIndex = index;
+    const match = tokenPattern.exec(text);
+    if (!match) break;
+    const token = match[0];
+    index = tokenPattern.lastIndex;
+    let type = '';
+    if (/^\s+$/.test(token)) type = 'whitespace';
+    else if (/^(?:true|false)$/.test(token)) type = 'keyword';
+    else if (/^(?:\|->|->|&&|\|\||!=|<=|>=|[=<>+*/!-])$/.test(token)) type = 'operator';
+    else if (/^%/.test(token)) type = irVariables.has(token) ? 'local' : 'invalid';
+    else if (/^@/.test(token)) type = irVariables.has(token) ? 'global' : 'invalid';
+    else if (/^[0-9]+$/.test(token)) type = 'number';
+    else if (/^[A-Za-z_]/.test(token)) type = irVariables.has(`%${token}`) ? 'alloca' : 'invalid';
+    else if (/^[(){}]$/.test(token)) type = 'punctuation';
+    else type = 'invalid';
+
+    const span = document.createElement('span');
+    if (type !== 'whitespace') span.className = `assertion-token ${type}`;
+    span.textContent = token;
+    container.append(span);
+  }
 }
 
 const state = {
@@ -16,10 +52,11 @@ const state = {
   irText: '',
   graphFile: null,
   graphDoc: null,
+  graphIRVariables: new Set(),
+  graphPreconditionProvided: false,
   layoutDoc: { format: 'depvec-layout-v1', functions: {} },
   models: [],
   drag: null,
-  suppressEdgeTextClick: null,
 };
 
 const irInput = $('#ir-file');
@@ -28,6 +65,7 @@ const layoutInput = $('#layout-file');
 const statusMessage = $('#status-message');
 const workspace = $('#workspace');
 const emptyState = $('#empty-state');
+const functionContracts = $('#function-contracts');
 const functionGrid = $('#function-grid');
 const saveButton = $('#save-layout');
 const exportGraphButton = $('#export-graph');
@@ -87,6 +125,7 @@ graphInput.addEventListener('change', async () => {
   try {
     const document = JSON.parse(await file.text());
     validateGraphDocument(document);
+    state.graphPreconditionProvided = Boolean(document.precondition.trim());
     state.graphFile = file;
     state.graphDoc = document;
     $('#graph-name').textContent = file.name;
@@ -129,8 +168,9 @@ async function loadCommandLineSession() {
     if (!irResponse.ok || !graphResponse.ok || state.irFile || state.graphDoc) return;
     const graphDocument = await graphResponse.json();
     validateGraphDocument(graphDocument);
+    state.graphPreconditionProvided = Boolean(graphDocument.precondition.trim());
     state.irText = await irResponse.text();
-    state.irFile = { name: session.irName };
+    state.irFile = session.irName ? { name: session.irName } : null;
     state.graphFile = { name: session.graphName };
     state.graphDoc = graphDocument;
     $('#ir-name').textContent = session.irName;
@@ -168,9 +208,12 @@ window.addEventListener('pointerup', (event) => {
   if (drag?.frame) cancelAnimationFrame(drag.frame);
   state.drag = null;
   if (!drag) return;
-  state.suppressEdgeTextClick = String(drag.edge.id);
   if (!drag.moved) {
-    selectEntity(drag.model, 'edge', drag.edge.id);
+    if (drag.model.altShowAllEdges && !edgeHasAssertion(drag.model, drag.edge.id)) {
+      selectUnannotatedEdge(drag.model, drag.edge);
+    } else {
+      selectEntity(drag.model, 'edge', drag.edge.id);
+    }
   } else {
     const position = clientPointInScene(drag.model.scene, event);
     const edgeLayout = getFunctionLayout(drag.model.function.name).edges[drag.edge.id];
@@ -185,86 +228,30 @@ window.addEventListener('pointercancel', (event) => {
   state.drag = null;
 });
 
+function setTemporaryAllEdges(active) {
+  const changed = state.models.some((model) => model.altShowAllEdges !== active);
+  if (!changed) return;
+  state.models.forEach((model) => { model.altShowAllEdges = active; });
+  state.models.forEach(setupOverlay);
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Alt' || event.repeat || event.target.matches('input, textarea, [contenteditable="true"]')) return;
+  setTemporaryAllEdges(true);
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.key === 'Alt') setTemporaryAllEdges(false);
+});
+
+window.addEventListener('blur', () => setTemporaryAllEdges(false));
+
 function clientPointInScene(scene, event) {
   const rect = scene.getBoundingClientRect();
   return {
     x: event.clientX - rect.left,
     y: event.clientY - rect.top,
   };
-}
-
-function openEdgeLabelEditor(model, edge, position) {
-  model.scene.querySelector('.edge-inline-editor')?.remove();
-  const displayedLabel = [...model.labelLayer.querySelectorAll('.edge-label-frame')]
-    .find((label) => label.dataset.edgeId === String(edge.id));
-  displayedLabel?.classList.add('editing');
-  const edgeLayout = getFunctionLayout(model.function.name).edges[edge.id];
-  const originalLabel = edgeLayout.label ?? edge.assertion ?? '';
-  const kindText = String(edge.kind || 'dependency');
-  const frame = document.createElement('div');
-  frame.className = 'edge-inline-editor';
-  frame.dataset.edgeId = String(edge.id);
-  frame.style.top = `${position.y}px`;
-  frame.style.left = `${position.left}px`;
-  frame.style.width = `${position.width}px`;
-  frame.style.height = `${position.height}px`;
-  const kind = document.createElement('span');
-  kind.className = 'edge-inline-editor-kind';
-  kind.textContent = kindText;
-  kind.style.color = edgeColor(edge.kind);
-  const assertion = document.createElement('span');
-  assertion.className = 'edge-inline-editor-assertion';
-  const openBrace = document.createElement('span');
-  openBrace.className = 'edge-assertion-brace';
-  openBrace.textContent = '{\u00a0';
-  const input = document.createElement('textarea');
-  input.className = 'edge-inline-editor-input';
-  input.rows = 1;
-  input.maxLength = 100;
-  input.setAttribute('aria-label', 'Edge assertion');
-  input.value = originalLabel;
-  const closeBrace = document.createElement('span');
-  closeBrace.className = 'edge-assertion-brace';
-  closeBrace.textContent = '\u00a0}';
-  assertion.append(openBrace, input, closeBrace);
-  frame.append(kind, assertion);
-
-  const resizeForAssertion = () => {
-    input.style.height = 'auto';
-    const inputHeight = Math.max(18, input.scrollHeight);
-    input.style.height = `${inputHeight}px`;
-    frame.style.height = `${inputHeight + 2}px`;
-  };
-  model.scene.append(frame);
-  input.style.height = `${Math.max(18, position.height - 2)}px`;
-  input.focus();
-  input.select();
-
-  let finished = false;
-  const finish = (commit) => {
-    if (finished) return;
-    finished = true;
-    if (commit) edgeLayout.label = input.value;
-    else if (originalLabel) edgeLayout.label = originalLabel;
-    else delete edgeLayout.label;
-    frame.remove();
-    setupOverlay(model);
-  };
-
-  input.addEventListener('input', () => {
-    edgeLayout.label = input.value;
-    resizeForAssertion();
-  });
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      finish(true);
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      finish(false);
-    }
-  });
-  input.addEventListener('blur', () => finish(true));
 }
 
 function setStatus(message, isError = false) {
@@ -276,6 +263,11 @@ function validateGraphDocument(document) {
   if (document?.format !== 'depvec-graph-v2' || !Array.isArray(document.functions)) {
     throw new Error('This is not a DepVec graph export. Generate one with `make graphs IR=path/to/file.ll`.');
   }
+  if (typeof document.precondition !== 'string') document.precondition = '';
+  if (typeof document.postcondition !== 'string') document.postcondition = '';
+  if (!document.globalInitialValues || typeof document.globalInitialValues !== 'object' || Array.isArray(document.globalInitialValues)) {
+    document.globalInitialValues = {};
+  }
   for (const fn of document.functions) {
     if (typeof fn.name !== 'string' || typeof fn.ir !== 'string' ||
         !Array.isArray(fn.nodes) || !Array.isArray(fn.edges)) {
@@ -284,18 +276,28 @@ function validateGraphDocument(document) {
   }
 }
 
+function initialGlobalAssertions(globalInitialValues) {
+  return Object.entries(globalInitialValues || {})
+    .filter(([name, value]) => /^@(?:[A-Za-z_][A-Za-z_0-9.]*|[0-9]+)$/.test(name) && /^(?:-?[0-9]+|true|false)$/.test(String(value)))
+    .map(([name, value]) => `${name} |-> ${value}`)
+    .join(' && ');
+}
+
 function refreshWorkspace() {
-  if (!state.irFile || !state.graphDoc) {
+  if (!state.graphDoc) {
     workspace.hidden = true;
     emptyState.hidden = false;
     saveButton.disabled = true;
     exportGraphButton.disabled = true;
-    setStatus(state.irFile || state.graphDoc
-      ? 'Choose the matching LLVM IR and graph export in the header.'
-      : 'Choose LLVM IR and graph JSON files above.');
+    setStatus(state.irFile
+      ? 'Choose the matching graph export in the header.'
+      : 'Choose a graph JSON export above, or choose a matching LLVM IR and graph JSON pair.');
     return;
   }
 
+  if (!state.graphPreconditionProvided) {
+    state.graphDoc.precondition = initialGlobalAssertions(state.graphDoc.globalInitialValues);
+  }
   state.models.forEach((model) => model.resizeObserver?.disconnect());
   state.models = state.graphDoc.functions.map((fn, index) => createFunctionModel(fn, index));
   workspace.hidden = false;
@@ -319,20 +321,32 @@ function createFunctionModel(fn, index) {
     if (mapping.complete) {
       lines = source.lines;
       nodeLines = mapping.nodeLines;
-    } else {
+    } else if (state.irFile) {
       warning = 'Some instructions could not be aligned to the selected module. Showing the canonical LLVM IR emitted with this graph.';
     }
-  } else {
+  } else if (state.irFile) {
     warning = `Function ${fn.name} was not found in the selected module. Showing the canonical LLVM IR emitted with this graph.`;
   }
 
   if (!lines) {
-    lines = fn.ir.replace(/\r\n/g, '\n').split('\n');
-    nodeLines = new Map(fn.nodes.map((node) => [Number(node.id), Number(node.line)]));
+    const graphIRLines = fn.ir.replace(/\r\n/g, '\n').split('\n');
+    while (graphIRLines.at(-1) === '') graphIRLines.pop();
+    const firstFunctionLine = graphIRLines.findIndex((line) => /^\s*define\b/.test(line));
+    const lineOffset = firstFunctionLine > 0 && graphIRLines
+      .slice(0, firstFunctionLine)
+      .every((line) => !line.trim() || /^\s*;/.test(line))
+      ? firstFunctionLine
+      : 0;
+    lines = graphIRLines.slice(lineOffset);
+    nodeLines = new Map(fn.nodes.map((node) => {
+      const line = Number(node.line);
+      return [Number(node.id), node.kind === 'init' ? 0 : line >= 0 ? line - lineOffset : line];
+    }));
   }
 
   return {
     function: fn,
+    irVariables: findIRVariables(fn.ir),
     index,
     lines,
     nodeLines,
@@ -351,6 +365,9 @@ function createFunctionModel(fn, index) {
     anchors: new Map(),
     edgeTracks: new Map(),
     lineNodes: new Map(),
+    showAllEdges: false,
+    altShowAllEdges: false,
+    edgeVisibilityButton: null,
   };
 }
 
@@ -476,9 +493,83 @@ function mapInstructions(lines, nodes) {
 
 function normalizeIR(line) { return String(line).trim().replace(/\s+/g, ' '); }
 
+function simplifyDisplayedIR(line) {
+  let text = String(line);
+  const commentStart = findLLVMCommentStart(text);
+  if (commentStart >= 0) text = text.slice(0, commentStart);
+
+  // Metadata attachments are presentation noise here; retain the instruction
+  // and its original line index so graph anchors remain stable.
+  text = text.replace(/,\s*![\w.$-]+\s+![\w.$-]+/g, '');
+  if (/^\s*!\d+\s*=/.test(text)) return '';
+
+  if (/^\s*br\b/.test(text)) text = text.replace(/\blabel\s+(%)/g, '$1');
+  if (/\b(?:load|store)\b/.test(text)) text = text.replace(/,\s*align\s+\d+\b/g, '');
+  return text;
+}
+
+function findLLVMCommentStart(text) {
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+    } else if (character === '"') inString = true;
+    else if (character === ';') return index;
+  }
+  return -1;
+}
+
 function renderWorkspace() {
+  renderFunctionContracts();
   functionGrid.replaceChildren();
   state.models.forEach((model) => functionGrid.append(renderFunctionCard(model)));
+}
+
+function renderFunctionContracts() {
+  functionContracts.replaceChildren();
+  state.graphIRVariables = findIRVariables(state.graphDoc.functions.map((fn) => fn.ir).join('\n'));
+  Object.keys(state.graphDoc.globalInitialValues || {}).forEach((name) => state.graphIRVariables.add(name));
+  for (const [field, label, ariaLabel] of [
+    ['precondition', 'Initial assertion', 'Global initial assertion'],
+    ['postcondition', 'Final assertion', 'Global final assertion'],
+  ]) {
+    const control = document.createElement('label');
+    control.className = 'function-contract';
+    const title = document.createElement('span');
+    title.className = 'function-contract-title';
+    title.textContent = label;
+    const editorControl = document.createElement('div');
+    editorControl.className = 'assertion-editor-control';
+    const highlight = document.createElement('div');
+    highlight.className = 'assertion-editor-highlight';
+    highlight.setAttribute('aria-hidden', 'true');
+    const highlightedText = document.createElement('pre');
+    highlightedText.className = 'assertion-editor-highlight-text';
+    highlight.append(highlightedText);
+    const input = document.createElement('textarea');
+    input.className = 'assertion-editor-input contract-editor-input';
+    input.rows = 2;
+    input.setAttribute('aria-label', ariaLabel);
+    input.value = state.graphDoc[field];
+    appendHighlightedAssertion(highlightedText, input.value, state.graphIRVariables);
+    input.addEventListener('scroll', () => {
+      highlightedText.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
+    });
+    input.addEventListener('input', () => {
+      highlightedText.replaceChildren();
+      appendHighlightedAssertion(highlightedText, input.value, state.graphIRVariables);
+      state.graphDoc[field] = input.value;
+      if (field === 'precondition') state.graphPreconditionProvided = true;
+      state.models.forEach(setupOverlay);
+    });
+    editorControl.append(highlight, input);
+    control.append(title, editorControl);
+    functionContracts.append(control);
+  }
 }
 
 function renderFunctionCard(model) {
@@ -503,7 +594,26 @@ function renderFunctionCard(model) {
     stat(`${fn.nodes.length}`, 'nodes'),
     stat(`${fn.edges.length}`, 'hyperedges'),
   );
-  header.append(title, stats);
+  const headerActions = document.createElement('div');
+  headerActions.className = 'function-header-actions';
+  const edgeVisibilityButton = document.createElement('button');
+  edgeVisibilityButton.className = 'edge-visibility-button';
+  edgeVisibilityButton.type = 'button';
+  edgeVisibilityButton.title = 'Hold Option (Alt) to temporarily show all dependencies';
+  edgeVisibilityButton.addEventListener('click', () => {
+    model.altShowAllEdges = false;
+    model.showAllEdges = !model.showAllEdges;
+    if (!model.showAllEdges && model.selected?.type === 'edge' && !edgeHasAssertion(model, model.selected.id)) {
+      model.selected = null;
+      updateInspector(model);
+    }
+    updateEdgeVisibilityControl(model);
+    setupOverlay(model);
+  });
+  model.edgeVisibilityButton = edgeVisibilityButton;
+  headerActions.append(stats, edgeVisibilityButton);
+  header.append(title, headerActions);
+  updateEdgeVisibilityControl(model);
 
   const viewport = document.createElement('div');
   viewport.className = 'graph-viewport';
@@ -523,7 +633,8 @@ function renderFunctionCard(model) {
     lineNode.className = 'ir-line';
     lineNode.dataset.line = String(lineIndex);
     lineNode.dataset.lineNumber = String(lineIndex + 1);
-    lineNode.textContent = line || '\u200b';
+    const displayedLine = simplifyDisplayedIR(line);
+    lineNode.textContent = displayedLine || '\u200b';
     code.append(lineNode);
     model.lineNodes.set(lineIndex, lineNode);
   });
@@ -545,8 +656,6 @@ function renderFunctionCard(model) {
     const nodes = byLine.get(line) || [];
     if (!nodes.length) return;
     lineNode.classList.add('is-node');
-    if (nodes.some((node) => node.kind === 'init')) lineNode.classList.add('kind-init');
-    if (nodes.some((node) => node.kind === 'exit')) lineNode.classList.add('kind-exit');
     lineNode.setAttribute('role', 'button');
     lineNode.tabIndex = 0;
     const layout = getFunctionLayout(fn.name);
@@ -597,6 +706,9 @@ function updateInspector(model) {
   if (!inspector) return;
   inspector.replaceChildren();
   const selected = model.selected;
+  inspector.classList.toggle('has-edge-selection', selected?.type === 'edge');
+  const summary = document.createElement('div');
+  summary.className = 'inspector-summary';
   const icon = document.createElement('span');
   icon.className = `selection-icon${selected?.type === 'edge' ? ' edge' : ''}`;
   icon.textContent = selected?.type === 'edge' ? '↗' : selected ? '•' : '＋';
@@ -606,19 +718,60 @@ function updateInspector(model) {
   const detail = document.createElement('span');
   if (!selected) {
     heading.textContent = 'Select an instruction or hyperedge';
-    detail.textContent = 'Click assertion text to edit it; drag its frame along the edge';
+    detail.textContent = 'Select an edge to edit its assertion below';
   } else if (selected.type === 'node') {
     const node = model.function.nodes.find((entry) => Number(entry.id) === Number(selected.id));
     heading.textContent = `${node?.kind ?? 'instruction'} node n${selected.id}`;
     detail.textContent = node?.instruction || 'Function boundary';
   } else {
-    const edge = model.function.edges.find((entry) => entry.id === selected.id);
+    const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
     heading.textContent = `${edge?.kind ?? 'dependency'} hyperedge`;
     detail.textContent = `${(edge?.sources || []).map((source) => `n${source}`).join(' + ')} → n${edge?.target ?? '?'}`;
   }
   copy.append(heading, detail);
+  summary.append(icon, copy);
+  inspector.append(summary);
 
-  inspector.append(icon, copy);
+  if (selected?.type === 'edge') {
+    const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
+    if (!edge) return;
+    const editor = document.createElement('label');
+    editor.className = 'assertion-editor';
+    const editorTitle = document.createElement('span');
+    editorTitle.className = 'assertion-editor-title';
+    editorTitle.textContent = 'Assertion';
+    const editorControl = document.createElement('div');
+    editorControl.className = 'assertion-editor-control';
+    const highlight = document.createElement('div');
+    highlight.className = 'assertion-editor-highlight';
+    highlight.setAttribute('aria-hidden', 'true');
+    const highlightedText = document.createElement('pre');
+    highlightedText.className = 'assertion-editor-highlight-text';
+    highlight.append(highlightedText);
+    const input = document.createElement('textarea');
+    input.className = 'assertion-editor-input';
+    input.rows = 2;
+    input.maxLength = 100;
+    input.setAttribute('aria-label', `Assertion for ${edge.kind} hyperedge`);
+    const edgeLayout = getFunctionLayout(model.function.name).edges[String(edge.id)];
+    input.value = edgeLayout?.label ?? edge.assertion ?? '';
+    appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
+    input.addEventListener('scroll', () => {
+      highlightedText.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
+    });
+    input.addEventListener('input', () => {
+      highlightedText.replaceChildren();
+      appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
+      const currentLayout = getFunctionLayout(model.function.name).edges;
+      currentLayout[String(edge.id)] ||= {};
+      currentLayout[String(edge.id)].label = input.value;
+      updateEdgeVisibilityControl(model);
+      setupOverlay(model);
+    });
+    editorControl.append(highlight, input);
+    editor.append(editorTitle, editorControl);
+    inspector.append(editor);
+  }
 }
 
 function createLegend(edges) {
@@ -647,9 +800,59 @@ function createLegend(edges) {
   return legend;
 }
 
+function edgeHasAssertion(model, edgeId) {
+  const edge = model.function.edges.find((candidate) => String(candidate.id) === String(edgeId));
+  if (!edge) return false;
+  const savedLabel = getFunctionLayout(model.function.name).edges[String(edge.id)]?.label;
+  return String(savedLabel ?? edge.assertion ?? '').trim().length > 0;
+}
+
+function edgeIsVisible(model, edge) {
+  return (model.selected?.type === 'edge' && String(model.selected.id) === String(edge.id)) ||
+    model.showAllEdges || model.altShowAllEdges || edgeHasAssertion(model, edge.id);
+}
+
+function updateEdgeVisibilityControl(model) {
+  const button = model.edgeVisibilityButton;
+  if (!button) return;
+  const hiddenCount = model.function.edges.filter((edge) => !edgeHasAssertion(model, edge.id)).length;
+  button.hidden = hiddenCount === 0;
+  button.textContent = model.showAllEdges
+    ? 'Hide unannotated dependencies'
+    : `Show all dependencies (${hiddenCount} hidden)`;
+  button.setAttribute('aria-pressed', String(model.showAllEdges));
+}
+
+function updateInstructionSpacing(model) {
+  const endpointCounts = new Map();
+  const addEndpoint = (nodeId) => {
+    const id = Number(nodeId);
+    endpointCounts.set(id, (endpointCounts.get(id) || 0) + 1);
+  };
+  for (const edge of model.function.edges) {
+    if (!edgeIsVisible(model, edge)) continue;
+    edge.sources.forEach(addEndpoint);
+    addEndpoint(edge.target);
+  }
+
+  const lineCounts = new Map();
+  for (const node of model.function.nodes) {
+    if (node.kind !== 'instruction') continue;
+    const line = model.nodeLines.get(Number(node.id));
+    if (!Number.isInteger(line)) continue;
+    lineCounts.set(line, (lineCounts.get(line) || 0) + (endpointCounts.get(Number(node.id)) || 0));
+  }
+  model.lineNodes.forEach((lineNode, line) => {
+    const degree = lineCounts.get(line) || 0;
+    const extraSpacing = Math.min(48, Math.max(0, degree - 1) * EDGE_ENDPOINT_BASE_SPACING * 2);
+    lineNode.style.lineHeight = `${19 + extraSpacing}px`;
+  });
+}
+
 function setupOverlay(model) {
   if (!model.card?.isConnected) return;
   model.svg?.remove();
+  updateInstructionSpacing(model);
   model.codeWidth = Math.max(280, model.pre.offsetWidth);
   model.sceneHeight = Math.max(model.pre.offsetHeight, 150);
 
@@ -667,37 +870,58 @@ function setupOverlay(model) {
   }
 
   const candidates = model.function.edges.map((edge, index) => {
-    const sources = edge.sources.map((id, sourceIndex) => ({
-      sourceIndex,
-      nodeId: Number(id),
-      anchor: model.anchors.get(Number(id)),
-      offset: 0,
-    })).filter((source) => source.anchor);
-    const target = model.anchors.get(Number(edge.target));
-    if (!target) return null;
-    const endpoints = [...sources.map((source) => source.anchor), target];
-    const startY = Math.min(...endpoints.map((anchor) => anchor.y));
-    const endY = Math.max(...endpoints.map((anchor) => anchor.y));
-    return { edge, index, sources, target, targetOffset: 0, startY, endY };
-  }).filter(Boolean).sort((a, b) => a.startY - b.startY || b.endY - a.endY || a.index - b.index);
+      const sources = edge.sources.map((id, sourceIndex) => ({
+        sourceIndex,
+        nodeId: Number(id),
+        anchor: model.anchors.get(Number(id)),
+        offset: 0,
+      })).filter((source) => source.anchor);
+      const target = model.anchors.get(Number(edge.target));
+      if (!target) return null;
+      const endpoints = [...sources.map((source) => source.anchor), target];
+      const startY = Math.min(...endpoints.map((anchor) => anchor.y));
+      const endY = Math.max(...endpoints.map((anchor) => anchor.y));
+      return { edge, index, sources, target, targetOffset: 0, startY, endY };
+    }).filter(Boolean).sort((a, b) => a.startY - b.startY || b.endY - a.endY || a.index - b.index);
+
+  // Reserve enough horizontal room for the full graph so hiding edges never
+  // moves the code, but pack visible edges independently below.
+  const reservedLaneEnds = [];
+  for (const track of candidates) {
+    let lane = reservedLaneEnds.findIndex((endY) => endY < track.startY);
+    if (lane < 0) lane = reservedLaneEnds.length;
+    reservedLaneEnds[lane] = track.endY;
+  }
+  const visibleCandidates = candidates.filter((track) => edgeIsVisible(model, track.edge));
 
   const endpointsByNode = new Map();
   const addEndpoint = (nodeId, endpoint) => {
     if (!endpointsByNode.has(nodeId)) endpointsByNode.set(nodeId, []);
     endpointsByNode.get(nodeId).push(endpoint);
   };
-  for (const track of candidates) {
+  for (const track of visibleCandidates) {
     for (const source of track.sources) addEndpoint(source.nodeId, { source });
     addEndpoint(Number(track.edge.target), { track });
   }
   for (const endpoints of endpointsByNode.values()) {
+    endpoints.sort((a, b) => Number(Boolean(a.track)) - Number(Boolean(b.track)));
+    const offsets = [0];
+    for (let index = 1; index < endpoints.length; index += 1) {
+      const previous = endpoints[index - 1];
+      const current = endpoints[index];
+      const spacing = previous.track && current.track
+        ? EDGE_ENDPOINT_SPACING
+        : EDGE_ENDPOINT_BASE_SPACING;
+      offsets.push(offsets[index - 1] + spacing);
+    }
+    const midpoint = (offsets[0] + offsets[offsets.length - 1]) / 2;
     endpoints.forEach((endpoint, index) => {
-      const offset = (index - (endpoints.length - 1) / 2) * EDGE_ENDPOINT_SPACING;
+      const offset = offsets[index] - midpoint;
       if (endpoint.source) endpoint.source.offset = offset;
       else endpoint.track.targetOffset = offset;
     });
   }
-  for (const track of candidates) {
+  for (const track of visibleCandidates) {
     const endpointYs = [
       ...track.sources.map((source) => source.anchor.y + source.offset),
       track.target.y + track.targetOffset,
@@ -705,10 +929,10 @@ function setupOverlay(model) {
     track.startY = Math.min(...endpointYs);
     track.endY = Math.max(...endpointYs);
   }
-  candidates.sort((a, b) => a.startY - b.startY || b.endY - a.endY || a.index - b.index);
+  visibleCandidates.sort((a, b) => a.startY - b.startY || b.endY - a.endY || a.index - b.index);
 
   const laneEnds = [];
-  for (const track of candidates) {
+  for (const track of visibleCandidates) {
     let lane = laneEnds.findIndex((endY) => endY < track.startY);
     if (lane < 0) lane = laneEnds.length;
     laneEnds[lane] = track.endY;
@@ -717,8 +941,8 @@ function setupOverlay(model) {
 
   const layout = getFunctionLayout(model.function.name);
   const firstTrackX = 12 + EDGE_LABEL_MAX_WIDTH;
-  model.codeLeft = laneEnds.length
-    ? firstTrackX + 10 + (laneEnds.length - 1) * EDGE_LANE_SPACING
+  model.codeLeft = reservedLaneEnds.length
+    ? firstTrackX + 14 + (reservedLaneEnds.length - 1) * EDGE_LANE_SPACING
     : 0;
   model.pre.style.marginLeft = `${model.codeLeft}px`;
   const hasNodeNotes = model.function.nodes.some((node) =>
@@ -741,7 +965,7 @@ function setupOverlay(model) {
   }
 
   model.edgeTracks = new Map();
-  for (const track of candidates) {
+  for (const track of visibleCandidates) {
     const trackTop = track.startY;
     const trackBottom = track.endY;
     const edgeLayout = layout.edges[String(track.edge.id)] || {};
@@ -772,11 +996,11 @@ function drawOverlay(model) {
   model.labelLayer.replaceChildren();
   const layout = getFunctionLayout(model.function.name);
   const tracks = [...model.edgeTracks.values()];
-  const editingEdgeId = model.scene.querySelector('.edge-inline-editor')?.dataset.edgeId;
-  tracks.sort((a, b) => Number(isSelected(model, 'edge', a.edge.id))
-    - Number(isSelected(model, 'edge', b.edge.id)));
+  tracks.sort((a, b) =>
+    Number(isEdgeDeemphasized(model, b.edge)) - Number(isEdgeDeemphasized(model, a.edge)) ||
+    Number(isSelected(model, 'edge', a.edge.id)) - Number(isSelected(model, 'edge', b.edge.id)));
   const leftMostTrackX = tracks.length ? Math.min(...tracks.map((track) => track.x)) : 0;
-  const labelRight = leftMostTrackX - EDGE_TRACK_LABEL_GAP;
+  const labelRight = (leftMostTrackX || 12 + EDGE_LABEL_MAX_WIDTH) - EDGE_TRACK_LABEL_GAP;
 
   for (const track of tracks) {
     const { edge, sources, target, targetOffset } = track;
@@ -784,9 +1008,12 @@ function drawOverlay(model) {
 
     const edgeLayout = layout.edges[String(edge.id)];
     const customLabel = edgeLayout.label ?? edge.assertion ?? '';
-    const fullLabel = `{ ${customLabel} }`;
     const kindText = String(edge.kind || 'dependency');
-    const labelWidth = edgeLabelWidth(edge.kind, customLabel);
+    const hasAssertion = edgeHasAssertion(model, edge.id);
+    const showKind = !hasAssertion;
+    const showAssertion = hasAssertion;
+    const fullLabel = showAssertion ? customLabel : showKind ? kindText : 'Selected dependency';
+    const labelWidth = edgeLabelWidth(edge.kind, customLabel, showKind, showAssertion);
     const labelY = edgeLayout.y;
     const labelLeft = labelRight - labelWidth;
 
@@ -804,23 +1031,23 @@ function drawOverlay(model) {
     addEdgePath(model, edge, edgePath.join(' '), color);
     model.svg.append(svgElement('path', {
       d: `M ${labelLeft + labelWidth} ${labelY} L ${track.x} ${labelY}`,
-      class: 'edge-label-tether',
+      class: `edge-label-tether${isEdgeDeemphasized(model, edge) ? ' muted' : ''}`,
       stroke: color,
     }));
 
     const labelFrame = document.createElement('div');
     labelFrame.className = `edge-label-frame${isSelected(model, 'edge', edge.id) ? ' selected' : ''}`;
-    if (editingEdgeId === String(edge.id)) labelFrame.classList.add('editing');
+    if (isEdgeDeemphasized(model, edge)) labelFrame.classList.add('muted');
     labelFrame.dataset.edgeId = String(edge.id);
     labelFrame.setAttribute('role', 'group');
-    labelFrame.setAttribute('aria-label', `Drag the ${edge.kind} assertion label up or down along its edge`);
+    labelFrame.setAttribute('aria-label', `Select or move the ${edge.kind} dependency label along its edge`);
     labelFrame.tabIndex = 0;
     labelFrame.style.left = `${labelLeft}px`;
     labelFrame.style.top = `${labelY}px`;
     labelFrame.style.width = `${labelWidth}px`;
     labelFrame.title = edge.values?.length
-      ? `${kindText} · ${fullLabel} · ${edge.values.join(', ')}`
-      : `${kindText} · ${fullLabel}`;
+      ? `${fullLabel} · ${edge.values.join(', ')}`
+      : fullLabel;
     labelFrame.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -852,67 +1079,56 @@ function drawOverlay(model) {
       }
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        selectEntity(model, 'edge', edge.id);
+        if (model.altShowAllEdges && !edgeHasAssertion(model, edge.id)) {
+          selectUnannotatedEdge(model, edge);
+        } else {
+          selectEntity(model, 'edge', edge.id);
+        }
         focusEdgeLabelFrame(model, edge.id);
       }
     });
 
-    const kindLabel = document.createElement('span');
-    kindLabel.className = 'edge-kind-label';
-    kindLabel.textContent = kindText;
-    kindLabel.style.color = color;
-
-    const assertionLabel = document.createElement('span');
-    assertionLabel.className = 'edge-assertion-label';
-    assertionLabel.setAttribute('role', 'button');
-    assertionLabel.setAttribute('tabindex', '0');
-    assertionLabel.setAttribute('aria-label', `Edit assertion for ${edge.kind} hyperedge`);
-    const openBrace = document.createElement('span');
-    openBrace.className = 'edge-assertion-brace';
-    openBrace.textContent = '{\u00a0';
-    const labelText = document.createElement('span');
-    labelText.className = 'edge-label-text';
-    labelText.textContent = customLabel;
-    const closeBrace = document.createElement('span');
-    closeBrace.className = 'edge-assertion-brace';
-    closeBrace.textContent = '\u00a0}';
-    assertionLabel.append(openBrace, labelText, closeBrace);
-    assertionLabel.addEventListener('pointerdown', (event) => {
-      state.suppressEdgeTextClick = null;
-      event.stopPropagation();
-    });
-    assertionLabel.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (state.suppressEdgeTextClick === String(edge.id)) {
-        state.suppressEdgeTextClick = null;
-        return;
-      }
-      const editorPosition = {
-        left: labelLeft,
-        y: labelY,
-        width: labelWidth,
-        height: labelFrame.offsetHeight,
-      };
-      selectEntity(model, 'edge', edge.id);
-      openEdgeLabelEditor(model, edge, editorPosition);
-    });
-    assertionLabel.addEventListener('keydown', (event) => {
-      event.stopPropagation();
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        const editorPosition = {
-          left: labelLeft,
-          y: labelY,
-          width: labelWidth,
-          height: labelFrame.offsetHeight,
-        };
-        selectEntity(model, 'edge', edge.id);
-        openEdgeLabelEditor(model, edge, editorPosition);
-      }
-    });
-    labelFrame.append(kindLabel, assertionLabel);
+    if (showKind) {
+      const kindLabel = document.createElement('span');
+      kindLabel.className = 'edge-kind-label';
+      kindLabel.textContent = kindText;
+      kindLabel.style.color = color;
+      labelFrame.append(kindLabel);
+    }
+    let labelText;
+    let assertionLabel;
+    if (showAssertion) {
+      assertionLabel = document.createElement('span');
+      assertionLabel.className = 'edge-assertion-label';
+      labelText = document.createElement('span');
+      labelText.className = 'edge-label-text';
+      appendHighlightedAssertion(labelText, customLabel, model.irVariables);
+      assertionLabel.append(labelText);
+      labelFrame.append(assertionLabel);
+    }
     model.labelLayer.append(labelFrame);
+  }
+
+  for (const node of model.function.nodes) {
+    if (node.kind !== 'init' && node.kind !== 'exit') continue;
+    const anchor = model.anchors.get(Number(node.id));
+    if (!anchor) continue;
+    const isInit = node.kind === 'init';
+    const condition = state.graphDoc[isInit ? 'precondition' : 'postcondition'] || 'true';
+    const label = document.createElement('div');
+    label.className = `contract-node-label ${isInit ? 'initial' : 'final'}`;
+    label.style.left = `${labelRight - EDGE_LABEL_MAX_WIDTH}px`;
+    label.style.top = `${anchor.y}px`;
+    label.style.width = `${EDGE_LABEL_MAX_WIDTH}px`;
+    label.setAttribute('aria-label', `${isInit ? 'Initial' : 'Final'} assertion: ${condition}`);
+    const kindLabel = document.createElement('span');
+    kindLabel.className = 'contract-node-label-kind';
+    kindLabel.textContent = isInit ? 'pre' : 'post';
+    const conditionLabel = document.createElement('span');
+    conditionLabel.className = 'edge-label-text';
+    appendHighlightedAssertion(conditionLabel, condition, state.graphIRVariables);
+    label.append(kindLabel, conditionLabel);
+    model.labelLayer.append(label);
   }
 
   for (const node of model.function.nodes) {
@@ -930,18 +1146,36 @@ function drawOverlay(model) {
 }
 
 function addEdgePath(model, edge, d, color) {
+  const muted = isEdgeDeemphasized(model, edge);
   const hit = svgElement('path', {
     d, class: `edge-hit${isSelected(model, 'edge', edge.id) ? ' selected' : ''}`,
   });
-  hit.addEventListener('click', () => selectEntity(model, 'edge', edge.id));
+  hit.addEventListener('click', () => {
+    if (model.altShowAllEdges && !edgeHasAssertion(model, edge.id)) {
+      selectUnannotatedEdge(model, edge);
+    } else {
+      selectEntity(model, 'edge', edge.id);
+    }
+  });
   model.svg.append(hit);
   const visible = svgElement('path', {
     d,
-    class: `edge-visible${isSelected(model, 'edge', edge.id) ? ' selected' : ''}`,
+    class: `edge-visible${isSelected(model, 'edge', edge.id) ? ' selected' : ''}${muted ? ' muted' : ''}`,
     stroke: color,
     fill: color,
   });
   model.svg.append(visible);
+}
+
+function isEdgeDeemphasized(model, edge) {
+  return (model.showAllEdges || model.altShowAllEdges) && edgeHasAssertion(model, edge.id);
+}
+
+function selectUnannotatedEdge(model, edge) {
+  model.altShowAllEdges = false;
+  model.showAllEdges = false;
+  updateEdgeVisibilityControl(model);
+  selectEntity(model, 'edge', edge.id);
 }
 
 function selectEntity(model, type, id) {
@@ -952,7 +1186,7 @@ function selectEntity(model, type, id) {
     model.lineNodes.get(line)?.classList.add('selected');
   }
   updateInspector(model);
-  drawOverlay(model);
+  setupOverlay(model);
 }
 
 function isSelected(model, type, id) {
@@ -1019,6 +1253,9 @@ function exportGraph() {
   if (!state.graphDoc) return;
 
   const graph = JSON.parse(JSON.stringify(state.graphDoc));
+  graph.precondition ??= '';
+  graph.postcondition ??= '';
+  graph.globalInitialValues ??= {};
   for (const fn of graph.functions) {
     const editedEdges = state.layoutDoc.functions?.[fn.name]?.edges || {};
     for (const edge of fn.edges) {

@@ -1,5 +1,8 @@
 {
   "format": "depvec-graph-v2",
+  "precondition": "",
+  "postcondition": "",
+  "globalInitialValues": {},
   "module": "minimal.ll",
   "functions": [
     {

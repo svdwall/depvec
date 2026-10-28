@@ -39,11 +39,12 @@
 
     <main id="top">
       <section id="empty-state" class="empty-state" aria-live="polite">
-        <strong>Open a module and its graph export to begin.</strong>
-        <span>Choose both files in the header, or launch with <code>./scripts/depvec-studio path/to/file.ll</code>.</span>
+        <strong>Open a graph export to begin.</strong>
+        <span>Choose a graph JSON file, or choose it with its matching LLVM IR file. Launch with <code>./scripts/depvec-studio path/to/file.ll</code> or <code>./scripts/depvec-studio path/to/graph.json</code>.</span>
       </section>
 
       <section id="workspace" class="workspace" hidden aria-live="polite">
+        <div id="function-contracts" class="function-contracts" aria-label="Initial and final assertions"></div>
         <div id="function-grid" class="function-grid"></div>
       </section>
     </main>

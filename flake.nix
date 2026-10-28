@@ -3,12 +3,23 @@
 
   outputs = { self, nixpkgs, flake-utils }:
   flake-utils.lib.eachDefaultSystem (system:
-  with import nixpkgs { inherit system; };
+  with import nixpkgs { inherit system; config.allowUnfree = true; };
   {
     packages.depvec-pass = llvmPackages_22.stdenv.mkDerivation {
       pname = "depvec-pass";
       version = "0.1.0";
-      src = self;
+      src = lib.cleanSourceWith {
+        src = self;
+        filter = path: type:
+          let
+            relativePath = lib.removePrefix "${toString self}/" (toString path);
+          in
+            toString path == toString self
+            || relativePath == "CMakeLists.txt"
+            || relativePath == "src"
+            || relativePath == "src/extractor"
+            || lib.hasPrefix "src/extractor/" relativePath;
+      };
 
       nativeBuildInputs = [ cmake ninja ];
       buildInputs = [ llvmPackages_22.libllvm ];
@@ -33,6 +44,7 @@
         llvmPackages_22.clang-tools
         llvmPackages_22.libllvm
         pre-commit
+        claude-code
         codex
       ];
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build DepVec graphs for an LLVM IR file and open the local graph studio."""
+"""Open DepVec Graph Studio from LLVM IR or an existing graph JSON export."""
 
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ FRONTEND = ROOT / "src" / "frontend"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the DepVec pass on an LLVM IR file and open Graph Studio."
+        description="Open Graph Studio from an LLVM IR file or an existing graph JSON export."
     )
-    parser.add_argument("ir", type=Path, help="LLVM IR module (.ll) to analyze")
+    parser.add_argument("input", type=Path, help="LLVM IR module (.ll) or DepVec graph JSON export")
     parser.add_argument(
         "--port", type=int, default=0,
         help="local web server port (default: choose an available port)",
@@ -63,7 +63,7 @@ def build_graphs(ir_file: Path, graph_file: Path) -> None:
     )
 
 
-def make_handler(ir_file: Path, graph_file: Path) -> type[BaseHTTPRequestHandler]:
+def make_handler(ir_file: Path | None, graph_file: Path) -> type[BaseHTTPRequestHandler]:
     class StudioHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             route = urlsplit(self.path).path
@@ -74,12 +74,15 @@ def make_handler(ir_file: Path, graph_file: Path) -> type[BaseHTTPRequestHandler
             elif route == "/styles.css":
                 self.send_file(FRONTEND / "styles.css", "text/css; charset=utf-8")
             elif route == "/api/ir":
-                self.send_file(ir_file, "text/plain; charset=utf-8")
+                if ir_file:
+                    self.send_file(ir_file, "text/plain; charset=utf-8")
+                else:
+                    self.send_body(b"", "text/plain; charset=utf-8")
             elif route == "/api/graphs":
                 self.send_file(graph_file, "application/json; charset=utf-8")
             elif route == "/api/session":
                 body = json.dumps(
-                    {"irName": ir_file.name, "graphName": "DepVec graph export"}
+                    {"irName": ir_file.name if ir_file else "", "graphName": graph_file.name}
                 ).encode("utf-8")
                 self.send_body(body, "application/json; charset=utf-8")
             else:
@@ -111,9 +114,9 @@ def make_handler(ir_file: Path, graph_file: Path) -> type[BaseHTTPRequestHandler
 
 def main() -> int:
     args = parse_args()
-    ir_file = args.ir.expanduser().resolve()
-    if not ir_file.is_file():
-        print(f"depvec-studio: LLVM IR file not found: {ir_file}", file=sys.stderr)
+    input_file = args.input.expanduser().resolve()
+    if not input_file.is_file():
+        print(f"depvec-studio: input file not found: {input_file}", file=sys.stderr)
         return 2
     if not 0 <= args.port <= 65535:
         print("depvec-studio: --port must be between 0 and 65535", file=sys.stderr)
@@ -121,8 +124,19 @@ def main() -> int:
 
     try:
         with TemporaryDirectory(prefix="depvec-studio-") as session_dir:
-            graph_file = Path(session_dir) / "depvec-graphs.json"
-            build_graphs(ir_file, graph_file)
+            if input_file.suffix.lower() == ".json":
+                try:
+                    graph_document = json.loads(input_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as error:
+                    raise RuntimeError(f"Could not read graph JSON: {error}") from error
+                if not isinstance(graph_document, dict) or graph_document.get("format") != "depvec-graph-v2" or not isinstance(graph_document.get("functions"), list):
+                    raise RuntimeError("Input JSON is not a DepVec graph export (expected depvec-graph-v2).")
+                ir_file = None
+                graph_file = input_file
+            else:
+                ir_file = input_file
+                graph_file = Path(session_dir) / "depvec-graphs.json"
+                build_graphs(ir_file, graph_file)
 
             server = ThreadingHTTPServer(
                 ("127.0.0.1", args.port), make_handler(ir_file, graph_file)

@@ -8,6 +8,9 @@ DepVec writes graph exports as UTF-8 JSON using the single format identifier
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Format identifier, currently `depvec-graph-v2`. |
+| `precondition` | string | Global precondition for the graph. |
+| `postcondition` | string | Global postcondition for the graph. |
+| `globalInitialValues` | object | Initial values of scalar integer globals, keyed by LLVM name (including `@`) and represented as assertion literals. |
 | `module` | string | LLVM module identifier. |
 | `functions` | array | Graphs for functions annotated with `depvec`. |
 
@@ -77,6 +80,12 @@ node.
 | `values` | string array | SSA values associated with the dependency, or branch-arm markers on control edges. |
 | `assertion` | string | Assertion label for the edge. Currently emitted as an empty string. |
 
+If `precondition` is empty, the frontend builds it from `globalInitialValues`.
+An existing non-empty precondition takes precedence. Initial values are emitted
+for initialized scalar integer globals; `i1` values use `true` or `false`, and
+other integer values use signed decimal notation. Aggregate and non-integer
+initializers are omitted.
+
 The backend parses a non-empty `assertion` string into a formula. An empty
 string means the formula `true`, so the edge adds no assertion constraint.
 
@@ -95,6 +104,9 @@ Edges leaving a branch node must be control edges.
 ```json
 {
   "format": "depvec-graph-v2",
+  "precondition": "",
+  "postcondition": "",
+  "globalInitialValues": {},
   "module": "example.ll",
   "functions": [
     {
