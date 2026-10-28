@@ -16,7 +16,7 @@ namespace {
 void addControlEdgesForBranch(
     const DependencyGraph &Graph, const llvm::BranchInst &Branch,
     const llvm::BasicBlock *BranchBlock, llvm::BasicBlock *Successor,
-    const char *BranchValue, const llvm::DominatorTree &DT,
+    const llvm::BasicBlock *OtherSuccessor, const char *BranchValue, const llvm::DominatorTree &DT,
     const llvm::PostDominatorTree &PDT,
     std::vector<DependencyGraph::DependencyEdge> &Edges) {
   auto AddEdge = [&](const llvm::Instruction &Target) {
@@ -28,9 +28,6 @@ void addControlEdgesForBranch(
     Edges.push_back(std::move(Edge));
   };
 
-  if (!Successor->empty())
-    AddEdge(Successor->front());
-
   std::vector<llvm::BasicBlock *> Worklist{Successor};
   std::set<const llvm::BasicBlock *> Visited;
   std::set<unsigned> EmittedTargets;
@@ -39,13 +36,12 @@ void addControlEdgesForBranch(
     Worklist.pop_back();
     if (!Visited.insert(Block).second ||
         !DT.dominates(BranchBlock, Block) ||
-        PDT.dominates(Block, BranchBlock))
+        (PDT.dominates(Block, BranchBlock) && !PDT.dominates(BranchBlock, OtherSuccessor))) 
       continue;
 
     for (llvm::Instruction &Instruction : *Block) {
       const unsigned TargetId = Graph.getNodeId(&Instruction);
-      if (EmittedTargets.insert(TargetId).second &&
-          !(Block == Successor && &Instruction == &Successor->front()))
+      if (EmittedTargets.insert(TargetId).second)
         AddEdge(Instruction);
     }
 
@@ -67,12 +63,12 @@ ControlDependencyAnalysis::run(const DependencyGraph &Graph,
       continue;
 
     const llvm::BasicBlock *BranchBlock = Branch->getParent();
-    addControlEdgesForBranch(Graph, *Branch, BranchBlock,
-                                Branch->getSuccessor(0), "true-branch", DT, PDT,
-                                Edges);
-    addControlEdgesForBranch(Graph, *Branch, BranchBlock,
-                                Branch->getSuccessor(1), "false-branch", DT,
-                                PDT, Edges);
+    llvm::BasicBlock *TrueSuccessor = Branch->getSuccessor(0);
+    llvm::BasicBlock *FalseSuccessor = Branch->getSuccessor(1);
+    addControlEdgesForBranch(Graph, *Branch, BranchBlock, TrueSuccessor,
+                             FalseSuccessor, "true-branch", DT, PDT, Edges);
+    addControlEdgesForBranch(Graph, *Branch, BranchBlock, FalseSuccessor,
+                             TrueSuccessor, "false-branch", DT, PDT, Edges);
   }
   return Edges;
 }
