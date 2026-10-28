@@ -11,7 +11,7 @@ namespace depvec {
 // The executable is resolved through PATH unless an explicit path is given.
 class Z3SmtLibEngine final : public SmtLibEngine {
 public:
-  explicit Z3SmtLibEngine(std::string executable = "z3");
+  explicit Z3SmtLibEngine(const std::string &executable = "z3");
   ~Z3SmtLibEngine() override;
 
   Z3SmtLibEngine(const Z3SmtLibEngine &) = delete;

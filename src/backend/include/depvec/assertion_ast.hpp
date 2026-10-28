@@ -119,18 +119,16 @@ inline Formula operator!(Formula operand) {
       std::make_shared<Formula>(std::move(operand))}};
 }
 
-inline FormulaPtr operator&&(FormulaPtr left, FormulaPtr right) {
-  return std::make_shared<Formula>(
-      *std::move(left) && *std::move(right));
+inline FormulaPtr operator&&(const FormulaPtr &left, const FormulaPtr &right) {
+  return std::make_shared<Formula>(*left && *right);
 }
 
-inline FormulaPtr operator||(FormulaPtr left, FormulaPtr right) {
-  return std::make_shared<Formula>(
-      *std::move(left) || *std::move(right));
+inline FormulaPtr operator||(const FormulaPtr &left, const FormulaPtr &right) {
+  return std::make_shared<Formula>(*left || *right);
 }
 
-inline FormulaPtr operator!(FormulaPtr operand) {
-  return std::make_shared<Formula>(!*std::move(operand));
+inline FormulaPtr operator!(const FormulaPtr &operand) {
+  return std::make_shared<Formula>(!*operand);
 }
 
 } // namespace depvec

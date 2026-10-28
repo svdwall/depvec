@@ -1,14 +1,18 @@
 repos:
   - repo: local
     hooks:
-      - id: clang-tidy
-        name: clang-tidy
-        entry: >-
-          sh -c 'exec clang-tidy --quiet -p build
-          --extra-arg-before="-isystem${DEPVEC_CXX_INCLUDE}" "$@"' --
+      - id: clang-tidy-extractor
+        name: clang-tidy extractor
+        entry: scripts/clang-tidy-hook build/extractor
         language: system
         types: [c++]
         files: ^src/extractor/.*\.cpp$
+      - id: clang-tidy-backend
+        name: clang-tidy backend
+        entry: scripts/clang-tidy-hook build/backend-nix
+        language: system
+        types: [c++]
+        files: ^(src|test)/backend/.*\.cpp$
       - id: clang-tidy-examples
         name: clang-tidy examples
         entry: >-

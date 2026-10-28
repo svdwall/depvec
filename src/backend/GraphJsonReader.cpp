@@ -53,11 +53,8 @@ InstructionReferences collectInstructionReferences(const FunctionDFG &function) 
     if (!instruction) continue;
     std::visit([&](const auto &instruction) {
       using Op = std::decay_t<decltype(instruction)>;
-      if constexpr (std::is_same_v<Op, IntegerBinaryInstruction>) {
-        references.values.insert(instruction.result.name);
-        collectValue(instruction.left, references);
-        collectValue(instruction.right, references);
-      } else if constexpr (std::is_same_v<Op, IntegerCompareInstruction>) {
+      if constexpr (std::is_same_v<Op, IntegerBinaryInstruction> ||
+                    std::is_same_v<Op, IntegerCompareInstruction>) {
         references.values.insert(instruction.result.name);
         collectValue(instruction.left, references);
         collectValue(instruction.right, references);
@@ -248,6 +245,7 @@ MemoryOrdering storeOrdering(const Json &object, const std::string &context) {
   return value;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): named after LLVM's operands.
 bool validCmpXchgOrderings(MemoryOrdering success, MemoryOrdering failure) {
   if (failure == MemoryOrdering::Relaxed)
     return true;

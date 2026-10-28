@@ -54,7 +54,7 @@ bool isMarkerCharacter(char character) {
 
 } // namespace
 
-Z3SmtLibEngine::Z3SmtLibEngine(std::string executable) {
+Z3SmtLibEngine::Z3SmtLibEngine(const std::string &executable) {
   int sockets[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) < 0)
     throwSystemError("creating Z3 communication socket");
@@ -111,6 +111,7 @@ Z3SmtLibEngine::~Z3SmtLibEngine() {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): fixed by SmtLibEngine.
 std::string Z3SmtLibEngine::execute(std::string_view commands,
                                     std::string_view marker) {
   if (socket_ < 0)

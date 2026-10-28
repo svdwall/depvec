@@ -1,0 +1,41 @@
+#!/bin/sh
+# Run clang-tidy against a CMake compilation database from the Nix devshell.
+# Usage: scripts/clang-tidy-hook <build-dir> <file>...
+#
+# The Nix clang wrapper injects libc++ and package include paths through the
+# environment, so they are missing from compile_commands.json. Pass them to
+# clang-tidy explicitly.
+set -eu
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: $0 <build-dir> <file>..." >&2
+  exit 2
+fi
+build_dir=$1
+shift
+
+if [ -z "${DEPVEC_CXX_INCLUDE:-}" ]; then
+  echo "clang-tidy-hook: run inside the Nix devshell (DEPVEC_CXX_INCLUDE is unset)" >&2
+  exit 1
+fi
+if [ ! -f "$build_dir/compile_commands.json" ]; then
+  echo "clang-tidy-hook: $build_dir/compile_commands.json not found; build first" >&2
+  exit 1
+fi
+
+include_args=
+for flag in ${NIX_CFLAGS_COMPILE:-}; do
+  case $flag in
+    -isystem) expect_path=1 ;;
+    *)
+      if [ "${expect_path:-0}" = 1 ]; then
+        include_args="$include_args --extra-arg=-isystem$flag"
+        expect_path=0
+      fi
+      ;;
+  esac
+done
+
+# shellcheck disable=SC2086 # include_args is a space-separated list of flags.
+exec clang-tidy --quiet -p "$build_dir" \
+  --extra-arg-before="-isystem$DEPVEC_CXX_INCLUDE" $include_args "$@"
