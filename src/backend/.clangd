@@ -1,2 +1,2 @@
 CompileFlags:
-  CompilationDatabase: ../../build/backend-nix
+  CompilationDatabase: ../../build/backend

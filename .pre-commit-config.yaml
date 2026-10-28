@@ -9,7 +9,7 @@ repos:
         files: ^src/extractor/.*\.cpp$
       - id: clang-tidy-backend
         name: clang-tidy backend
-        entry: scripts/clang-tidy-hook build/backend-nix
+        entry: scripts/clang-tidy-hook build/backend
         language: system
         types: [c++]
         files: ^(src|test)/backend/.*\.cpp$

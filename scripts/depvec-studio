@@ -37,27 +37,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_graphs(ir_file: Path, graph_file: Path) -> None:
-    subprocess.run(["make", "build-pass"], cwd=ROOT, check=True)
-
-    plugin_candidates = sorted(
-        (ROOT / "build" / "extractor" / "nix" / "lib").glob("DepVecPass.*")
-    )
-    if not plugin_candidates:
-        raise RuntimeError("The DepVec pass plugin was not found under build/extractor/nix/lib.")
-
-    opt = os.environ.get("LLVM_OPT") or shutil.which("opt")
-    if not opt:
+    if not (os.environ.get("LLVM_OPT") or shutil.which("opt")):
         raise RuntimeError("Could not find `opt` on PATH (or in LLVM_OPT).")
 
     subprocess.run(
-        [
-            opt,
-            f"-load-pass-plugin={plugin_candidates[0]}",
-            f"-depvec-output={graph_file}",
-            "-passes=depvec",
-            "-disable-output",
-            str(ir_file),
-        ],
+        ["make", "graphs", f"IR={ir_file}", f"OUT={graph_file}"],
         cwd=ROOT,
         check=True,
     )

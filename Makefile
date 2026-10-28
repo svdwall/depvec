@@ -1,13 +1,22 @@
-.PHONY: compile-ir compile-examples build-pass build-backend test-backend parse-graph nix-build pass graphs lint lint-examples lint-all
+.PHONY: compile-ir compile-examples build-pass build-backend test-backend parse-graph nix-build pass graphs example-graphs lint lint-examples lint-all clean clean-extractor clean-backend clean-examples
 
 EXAMPLE_PROGRAMS_DIR := examples/programs
-EXAMPLE_IR_DIR := build/examples/ir
+EXAMPLE_BUILD_DIR := build/examples
+EXAMPLE_IR_DIR := $(EXAMPLE_BUILD_DIR)/ir
+EXAMPLE_GRAPH_DIR := $(EXAMPLE_BUILD_DIR)/graphs
 EXAMPLE_C_SOURCES := $(wildcard $(EXAMPLE_PROGRAMS_DIR)/*.c)
 EXAMPLE_LL_FILES := $(patsubst $(EXAMPLE_PROGRAMS_DIR)/%.c,$(EXAMPLE_IR_DIR)/%.ll,$(EXAMPLE_C_SOURCES))
+EXAMPLE_GRAPH_FILES := $(patsubst $(EXAMPLE_IR_DIR)/%.ll,$(EXAMPLE_GRAPH_DIR)/%.depvec-graph.json,$(EXAMPLE_LL_FILES))
 SOURCE_CPP_FILES := $(wildcard src/extractor/*.cpp)
 EXTRACTOR_BUILD_DIR := build/extractor
 EXTRACTOR_PACKAGE := $(EXTRACTOR_BUILD_DIR)/nix
-BACKEND_BUILD_DIR := build/backend-nix
+EXTRACTOR_PLUGIN = $(firstword $(wildcard $(EXTRACTOR_BUILD_DIR)/DepVecPass.*))
+BACKEND_BUILD_DIR := build/backend
+LLVM_OPT ?= opt
+
+# The opt invocation that loads DepVec, shared by pass and graphs.
+DEPVEC_OPT = $(LLVM_OPT) -load-pass-plugin=$(EXTRACTOR_PLUGIN) -passes=depvec -disable-output
+GRAPH_OUT = $(or $(OUT),$(EXAMPLE_GRAPH_DIR)/$(notdir $(basename $(IR))).depvec-graph.json)
 
 # Compile one C source to optimized textual LLVM IR without loading DepVec.
 # Usage: make compile-ir SOURCE=examples/programs/def_use_independent.c
@@ -24,9 +33,10 @@ $(EXAMPLE_IR_DIR)/%.ll: $(EXAMPLE_PROGRAMS_DIR)/%.c $(EXAMPLE_PROGRAMS_DIR)/depv
 	mkdir -p $(EXAMPLE_IR_DIR)
 	clang -O2 -fno-discard-value-names -S -emit-llvm "$<" -o "$@"
 
+# Configure and build the LLVM pass in the Nix development shell.
 build-pass:
-	mkdir -p $(EXTRACTOR_BUILD_DIR)
-	nix build .#depvec-pass --out-link $(EXTRACTOR_PACKAGE)
+	nix develop --command sh -c 'cmake -S . -B $(EXTRACTOR_BUILD_DIR) -G Ninja -DCMAKE_CXX_COMPILER="$$DEPVEC_CXX_COMPILER" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'
+	nix develop --command cmake --build $(EXTRACTOR_BUILD_DIR)
 
 # Configure and build the standalone backend in the Nix development shell.
 build-backend:
@@ -43,24 +53,31 @@ parse-graph: build-backend
 	@test -n "$(GRAPH)" || (echo "Set GRAPH=path/to/graph.json" >&2; exit 1)
 	$(BACKEND_BUILD_DIR)/depvec-graph-parse "$(GRAPH)"
 
-nix-build: build-pass
+# Build the pass as a Nix package, linked to build/extractor/nix.
+nix-build:
+	mkdir -p $(EXTRACTOR_BUILD_DIR)
+	nix build .#depvec-pass --out-link $(EXTRACTOR_PACKAGE)
 
 # Run only DepVec on an existing .ll file.
 # Usage: make pass IR=build/examples/ir/def_use_independent.ll
 pass: build-pass
 	@test -n "$(IR)" || (echo "Set IR=path/to/file.ll" >&2; exit 1)
-	opt \
-		-load-pass-plugin=$(EXTRACTOR_PACKAGE)/lib/DepVecPass.* \
-		-passes=depvec -disable-output "$(IR)"
+	$(DEPVEC_OPT) "$(IR)"
 
 # Export the graphs for annotated functions as JSON for the standalone viewer.
-# Usage: make graphs IR=build/examples/ir/branch_phi.ll [OUT=depvec-graphs.json]
+# Writes build/examples/graphs/<name>.depvec-graph.json unless OUT is set.
+# Usage: make graphs IR=build/examples/ir/branch_phi.ll [OUT=path/to/graph.json]
 graphs: build-pass
 	@test -n "$(IR)" || (echo "Set IR=path/to/file.ll" >&2; exit 1)
-	opt \
-		-load-pass-plugin=$(EXTRACTOR_PACKAGE)/lib/DepVecPass.* \
-		-depvec-output="$(or $(OUT),depvec-graphs.json)" \
-		-passes=depvec -disable-output "$(IR)"
+	mkdir -p "$(dir $(GRAPH_OUT))"
+	$(DEPVEC_OPT) -depvec-output="$(GRAPH_OUT)" "$(IR)"
+
+# Export graphs for every C example.
+example-graphs: $(EXAMPLE_GRAPH_FILES)
+
+$(EXAMPLE_GRAPH_DIR)/%.depvec-graph.json: $(EXAMPLE_IR_DIR)/%.ll | build-pass
+	mkdir -p $(EXAMPLE_GRAPH_DIR)
+	$(DEPVEC_OPT) -depvec-output="$@" "$<"
 
 # Run clang-tidy on the pass sources using the CMake compile database.
 lint:
@@ -77,3 +94,18 @@ lint-examples:
 
 # Run clang-tidy on both the pass sources and C examples.
 lint-all: lint lint-examples
+
+# Remove the extractor build directory, including its Nix result link.
+clean-extractor:
+	rm -rf $(EXTRACTOR_BUILD_DIR)
+
+# Remove the backend build directory.
+clean-backend:
+	rm -rf $(BACKEND_BUILD_DIR)
+
+# Remove the compiled example IR and graphs.
+clean-examples:
+	rm -rf $(EXAMPLE_BUILD_DIR)
+
+# Remove all build outputs.
+clean: clean-extractor clean-backend clean-examples

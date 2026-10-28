@@ -3,5 +3,4 @@
 
 build
 result
-depvec-graphs.json
 *.depvec-layout.json

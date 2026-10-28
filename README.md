@@ -79,13 +79,17 @@ For example: `@ready |-> 1 -> @shared_value |-> 42`.
 Build commands can be run through the Nix development environment. The Makefile
 targets below enter that environment where needed:
 
-- `make build-backend` builds the standalone backend under `build/backend-nix`.
+- `make build-backend` builds the standalone backend under `build/backend`.
 - `make test-backend` builds the backend and runs its tests.
 - `make parse-graph GRAPH=examples/graphs/minimal-graph.json` parses a graph.
 - `make build-pass` builds the LLVM pass.
 - `make compile-examples`, then `make pass IR=build/examples/ir/example.ll` runs
   the pass on an example IR file.
-- `make graphs IR=build/examples/ir/example.ll` exports graph JSON.
+- `make graphs IR=build/examples/ir/example.ll` exports graph JSON to
+  `build/examples/graphs/example.depvec-graph.json` (override with `OUT=`).
+- `make example-graphs` compiles every C example and exports its graphs.
+- `make clean` removes all build outputs; `clean-extractor`, `clean-backend`,
+  and `clean-examples` remove one part each.
 
 `flake.nix` defines the development shell and provides LLVM 22, CMake/Ninja,
 ANTLR, Catch2, and Z3. See `Makefile` for the other targets and the variables

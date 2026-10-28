@@ -15,9 +15,9 @@ make compile-examples
 make graphs IR=build/examples/ir/message_passing.ll
 ```
 
-This writes `depvec-graphs.json` in the repository root. Choose that JSON file
-and the matching `.ll` file in `src/frontend/index.html` (open the HTML file in
-a browser).
+This writes `build/examples/graphs/message_passing.depvec-graph.json`. Choose
+that JSON file and the matching `.ll` file in `src/frontend/index.html` (open
+the HTML file in a browser).
 The graph export contains one graph for each function marked with the `depvec`
 annotation, along with the LLVM-printed function text and instruction line
 anchors used to draw the overlays.
@@ -25,7 +25,7 @@ anchors used to draw the overlays.
 To use a different output path:
 
 ```sh
-make graphs IR=build/examples/ir/message_passing.ll OUT=/tmp/message-passing-graphs.json
+make graphs IR=build/examples/ir/message_passing.ll OUT=/tmp/message-passing.depvec-graph.json
 ```
 
 ## Launch directly from the command line
