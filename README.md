@@ -3,6 +3,53 @@
 DepVec extracts dependency flow graphs from LLVM IR and checks verification
 conditions over graph nodes.
 
+## How it works
+
+```
+C source ──clang──▶ LLVM IR ──DepVec pass──▶ graph JSON ──▶ Graph Studio (view and annotate)
+                                                 │
+                                                 └──▶ backend: weakest preconditions → verification conditions → Z3
+```
+
+1. Mark the functions to analyze with `DEPVEC_ANALYZE`, from
+   `examples/programs/depvec.h`, and compile the C source to textual LLVM IR.
+2. The LLVM pass in `src/extractor/` builds a dependency graph for each marked
+   function and writes the graphs as `depvec-graph-v2` JSON.
+3. Graph Studio (`src/frontend/`) shows each graph next to its IR. Use it to
+   edit the layout and the assertions.
+4. The backend reads the graph, computes a weakest precondition for each node,
+   and uses Z3 to check that each node's precondition implies it.
+
+## Quickstart
+
+`scripts/depvec-studio` builds the pass, exports graphs from an IR file, and
+opens Graph Studio on localhost:
+
+```sh
+make compile-examples
+./scripts/depvec-studio build/examples/ir/message_passing.ll
+```
+
+It also accepts an existing graph JSON file. The script needs LLVM's `opt` on
+`PATH`, for example inside `nix develop`, or set `LLVM_OPT` to its path.
+
+## Assertion language
+
+Preconditions, postconditions, and edge assertions in the graph JSON are
+written in a small formula language. Its ANTLR grammar is
+`src/backend/DepVecAssertion.g4`.
+
+- Values: integers, SSA values (`%x`), globals (`@g`), and dereferences
+  (`*%p`, `*@g`).
+- Arithmetic: `+ - * /` and unary `-`.
+- Comparisons: `= != < <= > >=`.
+- Points-to facts: `buf |-> 0` for an alloca named `buf`, and `@g |-> 1` for a
+  global.
+- Logic: `true`, `false`, `!`, `&&`, `||`, and `->`. Implication (`->`) binds
+  loosest and associates to the right.
+
+For example: `@ready |-> 1 -> @shared_value |-> 42`.
+
 ## Project layout
 
 - `src/extractor/`: LLVM pass that analyzes annotated functions and emits
@@ -18,8 +65,14 @@ conditions over graph nodes.
   conditions.
 - `examples/`: sample C programs and graph JSON inputs.
 
-`GRAPH_FORMAT.md` documents the versioned graph JSON format. See
-`src/frontend/README.md` for frontend workflows.
+## Further documentation
+
+- `GRAPH_FORMAT.md`: the versioned graph JSON format.
+- `llvm-support.md`: which LLVM instructions are supported and how
+  pointers and memory orderings are modeled.
+- `src/frontend/README.md`: Graph Studio workflows.
+- `ideas.md`: design notes and the roadmap.
+- `AGENTS.md`: guidelines for contributors and coding agents.
 
 ## Build and run
 
@@ -35,5 +88,6 @@ targets below enter that environment where needed:
 - `make graphs IR=build/examples/ir/example.ll` exports graph JSON.
 
 `flake.nix` defines the development shell and provides LLVM 22, CMake/Ninja,
-ANTLR, Catch2, and Z3. Run `make` without a target or inspect `Makefile` for
-additional workflows and required variables.
+ANTLR, Catch2, and Z3. See `Makefile` for the other targets and the variables
+they require. A bare `make` runs `compile-ir`, which requires
+`SOURCE=path/to/file.c`.
