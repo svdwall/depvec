@@ -20,7 +20,7 @@
           "values": []
         }
       ],
-      "ir": "; Function Attrs: mustprogress nofree norecurse nounwind sspstrong willreturn memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine void @message_passing_writer() #0 {\nentry:\n  store atomic i32 42, ptr @shared_value monotonic, align 4\n  store atomic i32 1, ptr @ready release, align 4\n  ret void\n}\n",
+      "ir": "; Function Attrs: mustprogress nofree norecurse nounwind sspstrong willreturn memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine void @message_passing_writer() #0 {\nentry:\n  store atomic i32 42, ptr @shared_value monotonic, align 4\n  store atomic i32 1, ptr @ready release, align 4\n  ret void\n}",
       "name": "message_passing_writer",
       "nodes": [
         {
@@ -128,9 +128,9 @@
           "sources": [
             4
           ],
-          "target": 2,
+          "target": 5,
           "values": [
-            "true-branch"
+            "false-branch"
           ]
         },
         {
@@ -140,13 +140,13 @@
           "sources": [
             4
           ],
-          "target": 5,
+          "target": 6,
           "values": [
             "false-branch"
           ]
         }
       ],
-      "ir": "; Function Attrs: nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine i32 @message_passing_reader() #1 {\nentry:\n  br label %while.cond\n\nwhile.cond:                                       ; preds = %while.cond, %entry\n  %0 = load atomic i32, ptr @ready acquire, align 4\n  %cmp = icmp eq i32 %0, 0\n  br i1 %cmp, label %while.cond, label %while.end, !llvm.loop !10\n\nwhile.end:                                        ; preds = %while.cond\n  %1 = load atomic i32, ptr @shared_value monotonic, align 4\n  ret i32 %1\n}\n",
+      "ir": "; Function Attrs: nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine i32 @message_passing_reader() #1 {\nentry:\n  br label %while.cond\n\nwhile.cond:                                       ; preds = %while.cond, %entry\n  %0 = load atomic i32, ptr @ready acquire, align 4\n  %cmp = icmp eq i32 %0, 0\n  br i1 %cmp, label %while.cond, label %while.end, !llvm.loop !10\n\nwhile.end:                                        ; preds = %while.cond\n  %1 = load atomic i32, ptr @shared_value monotonic, align 4\n  ret i32 %1\n}",
       "name": "message_passing_reader",
       "nodes": [
         {

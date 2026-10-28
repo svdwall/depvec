@@ -16,8 +16,8 @@ namespace {
 void addControlEdgesForBranch(
     const DependencyGraph &Graph, const llvm::BranchInst &Branch,
     const llvm::BasicBlock *BranchBlock, llvm::BasicBlock *Successor,
-    const llvm::BasicBlock *OtherSuccessor, const char *BranchValue, const llvm::DominatorTree &DT,
-    const llvm::PostDominatorTree &PDT,
+    const llvm::BasicBlock *OtherSuccessor, const char *BranchValue,
+    const llvm::DominatorTree &DT, const llvm::PostDominatorTree &PDT,
     std::vector<DependencyGraph::DependencyEdge> &Edges) {
   auto AddEdge = [&](const llvm::Instruction &Target) {
     DependencyGraph::DependencyEdge Edge;
@@ -36,7 +36,8 @@ void addControlEdgesForBranch(
     Worklist.pop_back();
     if (!Visited.insert(Block).second ||
         !DT.dominates(BranchBlock, Block) ||
-        (PDT.dominates(Block, BranchBlock) && !PDT.dominates(BranchBlock, OtherSuccessor))) 
+        (PDT.dominates(Block, BranchBlock) &&
+         !PDT.dominates(BranchBlock, OtherSuccessor)))
       continue;
 
     for (llvm::Instruction &Instruction : *Block) {
@@ -58,7 +59,8 @@ ControlDependencyAnalysis::run(const DependencyGraph &Graph,
                                const llvm::PostDominatorTree &PDT) {
   std::vector<DependencyGraph::DependencyEdge> Edges;
   for (const DependencyGraph::Node &Node : Graph.nodes) {
-    const auto *Branch = llvm::dyn_cast_or_null<llvm::BranchInst>(Node.instruction);
+    const auto *Branch =
+        llvm::dyn_cast_or_null<llvm::BranchInst>(Node.instruction);
     if (!Branch || Branch->getNumSuccessors() != 2)
       continue;
 
