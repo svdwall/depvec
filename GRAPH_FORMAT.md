@@ -79,6 +79,7 @@ node.
 | `kind` | string | Dependency category, such as data or memory dependency. |
 | `values` | string array | SSA values associated with the dependency, or branch-arm markers on control edges. |
 | `assertion` | string | Assertion label for the edge. Currently emitted as an empty string. |
+| `interferences` | integer array | IDs of nodes in the same function that interfere with the edge. Currently emitted as an empty array. |
 
 If `precondition` is empty, the frontend builds it from `globalInitialValues`.
 An existing non-empty precondition takes precedence. Initial values are emitted
@@ -94,9 +95,10 @@ Control edges leaving a conditional branch node carry either
 successor index. The extractor creates these edges only for branches with two
 successors. The backend treats `br` operations as branch nodes and forms their separate
 true and false postconditions by conjoining assertions on control edges marked
-for each arm. The extractor emits direct edges to each branch successor, then
-propagates arm-labeled control edges through successor blocks while those blocks
-are dominated by the branch, stopping at blocks that post-dominate the branch.
+for each arm. The extractor propagates arm-labeled control edges from each branch successor
+through blocks dominated by the branch, stopping at blocks that post-dominate
+the branch, unless the other successor always returns to the branch, as at a
+loop exit.
 Edges leaving a branch node must be control edges.
 
 ## Example
@@ -147,7 +149,8 @@ Edges leaving a branch node must be control edges.
           "target": 2,
           "kind": "data",
           "values": ["%buf"],
-          "assertion": ""
+          "assertion": "",
+          "interferences": []
         }
       ]
     }

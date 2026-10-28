@@ -43,7 +43,8 @@
           "target": 2,
           "kind": "data",
           "values": ["%buf"],
-          "assertion": "%missing > 0 && buf |-> 42"
+          "assertion": "%missing > 0 && buf |-> 42",
+          "interferences": []
         },
         {
           "id": "e1",
@@ -51,7 +52,8 @@
           "target": 3,
           "kind": "control",
           "values": [],
-          "assertion": ""
+          "assertion": "",
+          "interferences": []
         }
       ]
     }

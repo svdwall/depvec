@@ -318,6 +318,9 @@ json::Object serializeFunction(const Function &F,
     json::Array Values;
     for (const std::string &Value : Edge.values)
       Values.push_back(Value);
+    json::Array Interferences;
+    for (unsigned Interference : Edge.interferences)
+      Interferences.push_back(Interference);
 
     json::Object SerializedEdge;
     SerializedEdge["id"] = (Twine("e") + Twine(Index)).str();
@@ -326,6 +329,7 @@ json::Object serializeFunction(const Function &F,
     SerializedEdge["kind"] = Edge.kind;
     SerializedEdge["values"] = std::move(Values);
     SerializedEdge["assertion"] = "";
+    SerializedEdge["interferences"] = std::move(Interferences);
     Edges.push_back(std::move(SerializedEdge));
   }
 

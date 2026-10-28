@@ -86,6 +86,7 @@ struct DependencyEdge {
   std::string kind;
   std::vector<std::string> values;
   FormulaPtr assertion;
+  std::vector<NodeId> interferences;
 };
 
 inline constexpr const char *TrueBranchValue = "true-branch";

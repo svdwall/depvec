@@ -29,6 +29,8 @@ struct DependencyGraph {
     // register names in values; memory edges leave values empty.
     std::string kind;
     std::set<std::string> values;
+    // Nodes that interfere with this dependency. No analysis fills it yet.
+    std::set<unsigned> interferences;
   };
 
   llvm::Function *function = nullptr;

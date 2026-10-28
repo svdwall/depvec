@@ -411,26 +411,33 @@ GraphNode parseNode(const Json &value, const std::string &functionName) {
   throw std::runtime_error(context + ": unknown node kind '" + kind + "'");
 }
 
+std::vector<NodeId> nodeIdArrayField(const Json &value, const char *name,
+                                     const std::string &context) {
+  const Json &array = field(value, name, context);
+  if (!array.is_array())
+    throw std::runtime_error(context + ": " + name + " must be an array");
+  std::vector<NodeId> ids;
+  ids.reserve(array.size());
+  for (const Json &entry : array) {
+    if (!entry.is_number_integer() && !entry.is_number_unsigned())
+      throw std::runtime_error(context + ": " + name + " entries must be integer node IDs");
+    if (entry.is_number_unsigned()) {
+      ids.push_back(entry.get<NodeId>());
+    } else {
+      const auto id = entry.get<std::int64_t>();
+      if (id < 0)
+        throw std::runtime_error(context + ": " + name + " entries cannot be negative");
+      ids.push_back(static_cast<NodeId>(id));
+    }
+  }
+  return ids;
+}
+
 DependencyEdge parseEdge(const Json &value, const std::string &functionName) {
   const std::string context = "function '" + functionName + "' edge";
   DependencyEdge edge;
   edge.id = stringField(value, "id", context);
-  const Json &sources = field(value, "sources", context);
-  if (!sources.is_array())
-    throw std::runtime_error(context + " '" + edge.id + "': sources must be an array");
-  edge.sources.reserve(sources.size());
-  for (const Json &source : sources) {
-    if (!source.is_number_integer() && !source.is_number_unsigned())
-      throw std::runtime_error(context + " '" + edge.id + "': source ID must be an integer");
-    if (source.is_number_unsigned()) {
-      edge.sources.push_back(source.get<NodeId>());
-    } else {
-      const auto id = source.get<std::int64_t>();
-      if (id < 0)
-        throw std::runtime_error(context + " '" + edge.id + "': source ID cannot be negative");
-      edge.sources.push_back(static_cast<NodeId>(id));
-    }
-  }
+  edge.sources = nodeIdArrayField(value, "sources", context + " '" + edge.id + "'");
   edge.target = unsignedField(value, "target", context + " '" + edge.id + "'");
   edge.kind = stringField(value, "kind", context + " '" + edge.id + "'");
   const Json &values = field(value, "values", context + " '" + edge.id + "'");
@@ -453,6 +460,8 @@ DependencyEdge parseEdge(const Json &value, const std::string &functionName) {
                                error.what());
     }
   }
+  edge.interferences =
+      nodeIdArrayField(value, "interferences", context + " '" + edge.id + "'");
   return edge;
 }
 
@@ -570,6 +579,12 @@ FunctionDFG parseFunction(const Json &value) {
         throw std::runtime_error("function '" + function.name + "' edge '" + edge.id +
                                  "': source node " + std::to_string(source) +
                                  " does not exist");
+    }
+    for (NodeId interference : edge.interferences) {
+      if (!nodeIds.count(interference))
+        throw std::runtime_error("function '" + function.name + "' edge '" + edge.id +
+                                 "': interference node " +
+                                 std::to_string(interference) + " does not exist");
     }
     function.edges.push_back(std::move(edge));
   }

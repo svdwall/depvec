@@ -75,7 +75,8 @@
           "target": 2,
           "kind": "data",
           "values": ["%cmp"],
-          "assertion": ""
+          "assertion": "",
+          "interferences": []
         },
         {
           "id": "e1",
@@ -83,7 +84,8 @@
           "target": 3,
           "kind": "control",
           "values": ["true-branch"],
-          "assertion": "%x > 0"
+          "assertion": "%x > 0",
+          "interferences": []
         },
         {
           "id": "e2",
@@ -91,7 +93,8 @@
           "target": 4,
           "kind": "control",
           "values": ["false-branch"],
-          "assertion": "%x <= 0"
+          "assertion": "%x <= 0",
+          "interferences": []
         },
         {
           "id": "e3",
@@ -99,7 +102,8 @@
           "target": 5,
           "kind": "control",
           "values": [],
-          "assertion": ""
+          "assertion": "",
+          "interferences": []
         },
         {
           "id": "e4",
@@ -107,7 +111,8 @@
           "target": 5,
           "kind": "control",
           "values": [],
-          "assertion": ""
+          "assertion": "",
+          "interferences": []
         }
       ]
     }

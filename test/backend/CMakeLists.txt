@@ -1,5 +1,6 @@
 add_executable(DepVecBackendTests
   assertion_parser_test.cpp
+  graph_json_reader_test.cpp
   solver_test.cpp
   verification_condition_test.cpp
 )

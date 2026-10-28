@@ -1263,6 +1263,7 @@ function exportGraph() {
       edge.assertion = editedAssertion === undefined
         ? String(edge.assertion || '').trim()
         : String(editedAssertion).trim();
+      if (!Array.isArray(edge.interferences)) edge.interferences = [];
     }
   }
 
