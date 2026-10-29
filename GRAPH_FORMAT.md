@@ -69,7 +69,9 @@ function; edge IDs such as `e0` are not stable across exports.
 ## Edge object
 
 An edge is a hyperedge: it connects zero or more source nodes to one target
-node.
+node. The extractor currently emits exactly one source per edge. A data edge
+connects one SSA value's defining node to one user, so an instruction that uses
+several values has one data edge per value.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

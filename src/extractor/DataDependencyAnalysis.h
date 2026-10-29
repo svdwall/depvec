@@ -6,7 +6,8 @@
 namespace depvec {
 
 // Builds step-one SSA def-use edges and folds them into step-two data
-// dependency edges. Node ownership and construction remain with the graph.
+// dependency edges, one per target and SSA value. Node ownership and
+// construction remain with the graph.
 class DataDependencyAnalysis {
 public:
   static std::vector<DependencyGraph::DependencyEdge>

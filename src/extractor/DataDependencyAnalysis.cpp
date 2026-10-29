@@ -56,24 +56,27 @@ DataDependencyAnalysis::run(const DependencyGraph &Graph) {
     }
   }
 
-  // Step 2: one data hyperedge per target. Its sources are the distinct
-  // defining nodes and its values retain the SSA names represented by them.
-  std::map<unsigned, DependencyGraph::DependencyEdge> ByTarget;
+  // Step 2: one data edge per target and SSA value. Repeated uses of the same
+  // value, such as `add %x, %x` or a phi incoming from several blocks, share
+  // one edge.
+  std::map<std::pair<unsigned, std::string>, DependencyGraph::DependencyEdge>
+      ByTargetAndValue;
   for (const DefUseEdge &Edge : DefUseEdges) {
-    auto [It, Inserted] = ByTarget.try_emplace(Edge.target);
+    auto [It, Inserted] =
+        ByTargetAndValue.try_emplace({Edge.target, Edge.value});
+    if (!Inserted)
+      continue;
     DependencyGraph::DependencyEdge &DataEdge = It->second;
-    if (Inserted) {
-      DataEdge.target = Edge.target;
-      DataEdge.kind = "data";
-    }
     DataEdge.sources.insert(Edge.source);
+    DataEdge.target = Edge.target;
+    DataEdge.kind = "data";
     DataEdge.values.insert(Edge.value);
   }
 
   std::vector<DependencyGraph::DependencyEdge> Result;
-  Result.reserve(ByTarget.size());
-  for (auto &[Target, Edge] : ByTarget) {
-    (void)Target;
+  Result.reserve(ByTargetAndValue.size());
+  for (auto &[Key, Edge] : ByTargetAndValue) {
+    (void)Key;
     Result.push_back(std::move(Edge));
   }
   return Result;
