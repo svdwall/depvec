@@ -6,7 +6,8 @@
 namespace depvec {
 
 // Builds step-one SSA def-use edges and folds them into step-two data
-// dependency edges, one per target and SSA value. Node ownership and
+// dependency edges: one per target and SSA value, except for phi targets,
+// which get one hyperedge over all incoming values. Node ownership and
 // construction remain with the graph.
 class DataDependencyAnalysis {
 public:

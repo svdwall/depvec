@@ -2,6 +2,7 @@
 
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -57,19 +58,21 @@ DataDependencyAnalysis::run(const DependencyGraph &Graph) {
   }
 
   // Step 2: one data edge per target and SSA value. Repeated uses of the same
-  // value, such as `add %x, %x` or a phi incoming from several blocks, share
-  // one edge.
+  // value, such as `add %x, %x`, share one edge. A phi instead gets a single
+  // hyperedge whose sources are all of its incoming values.
   std::map<std::pair<unsigned, std::string>, DependencyGraph::DependencyEdge>
       ByTargetAndValue;
   for (const DefUseEdge &Edge : DefUseEdges) {
-    auto [It, Inserted] =
-        ByTargetAndValue.try_emplace({Edge.target, Edge.value});
-    if (!Inserted)
-      continue;
+    const bool TargetIsPhi =
+        llvm::isa<llvm::PHINode>(Graph.nodes[Edge.target].instruction);
+    auto [It, Inserted] = ByTargetAndValue.try_emplace(
+        {Edge.target, TargetIsPhi ? std::string() : Edge.value});
     DependencyGraph::DependencyEdge &DataEdge = It->second;
+    if (Inserted) {
+      DataEdge.target = Edge.target;
+      DataEdge.kind = "data";
+    }
     DataEdge.sources.insert(Edge.source);
-    DataEdge.target = Edge.target;
-    DataEdge.kind = "data";
     DataEdge.values.insert(Edge.value);
   }
 
