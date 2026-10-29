@@ -43,6 +43,7 @@
         llvmPackages_22.clang
         llvmPackages_22.clang-tools
         llvmPackages_22.libllvm
+        lean4
         pre-commit
         claude-code
         codex

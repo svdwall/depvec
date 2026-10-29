@@ -1,4 +1,4 @@
-.PHONY: compile-ir compile-examples build-pass build-backend test-backend parse-graph nix-build pass graphs example-graphs lint lint-examples lint-all clean clean-extractor clean-backend clean-examples
+.PHONY: compile-ir compile-examples build-pass build-backend test-backend build-formal parse-graph nix-build pass graphs example-graphs lint lint-examples lint-all clean clean-extractor clean-backend clean-examples
 
 EXAMPLE_PROGRAMS_DIR := examples/programs
 EXAMPLE_BUILD_DIR := build/examples
@@ -42,6 +42,10 @@ build-pass:
 build-backend:
 	nix develop --command sh -c 'cmake -S src/backend -B $(BACKEND_BUILD_DIR) -DCMAKE_CXX_COMPILER="$$DEPVEC_CXX_COMPILER" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'
 	nix develop --command cmake --build $(BACKEND_BUILD_DIR) -j4
+
+# Type-check the Lean formalization of interference in formal/.
+build-formal:
+	cd formal && nix develop .. --command lake build
 
 # Build and run the standalone backend tests.
 test-backend: build-backend

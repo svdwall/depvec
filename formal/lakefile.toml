@@ -1,0 +1,5 @@
+name = "depvec-formal"
+defaultTargets = ["Depvec"]
+
+[[lean_lib]]
+name = "Depvec"
