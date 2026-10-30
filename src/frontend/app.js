@@ -938,7 +938,8 @@ function setupOverlay(model) {
     addEndpoint(Number(track.edge.target), { track });
   }
   for (const endpoints of endpointsByNode.values()) {
-    endpoints.sort((a, b) => Number(Boolean(a.track)) - Number(Boolean(b.track)));
+    // Incoming edges connect above outgoing ones.
+    endpoints.sort((a, b) => Number(Boolean(b.track)) - Number(Boolean(a.track)));
     const offsets = [0];
     for (let index = 1; index < endpoints.length; index += 1) {
       const previous = endpoints[index - 1];

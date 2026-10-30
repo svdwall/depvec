@@ -4,7 +4,7 @@
     {
       "edges": [
         {
-          "assertion": "",
+          "assertion": "@shared_value |-> 42",
           "id": "e0",
           "interferences": [],
           "kind": "memory (release)",
@@ -125,7 +125,7 @@
           ]
         },
         {
-          "assertion": "",
+          "assertion": "%cmp = false -> %0 = 1",
           "id": "e1",
           "interferences": [
             1,
@@ -141,7 +141,7 @@
           ]
         },
         {
-          "assertion": "",
+          "assertion": "%1 = 42",
           "id": "e2",
           "interferences": [
             1
@@ -171,7 +171,7 @@
           "values": []
         },
         {
-          "assertion": "",
+          "assertion": "%0 = 1",
           "id": "e4",
           "interferences": [
             1
@@ -218,7 +218,7 @@
           "values": []
         },
         {
-          "assertion": "",
+          "assertion": "@ready |-> 1 -> @shared_value |-> 42",
           "id": "e7",
           "interferences": [
             1,
@@ -400,5 +400,5 @@
   },
   "module": "message_passing.ll",
   "postcondition": "",
-  "precondition": ""
+  "precondition": "@ready |-> 0 && @shared_value |-> 0"
 }
