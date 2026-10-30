@@ -3,6 +3,7 @@ add_executable(DepVecBackendTests
   graph_json_reader_test.cpp
   solver_test.cpp
   verification_condition_test.cpp
+  weakest_precondition_test.cpp
 )
 target_include_directories(DepVecBackendTests
   PRIVATE "${PROJECT_SOURCE_DIR}/solver"

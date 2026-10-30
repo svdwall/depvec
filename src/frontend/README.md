@@ -62,6 +62,8 @@ local port.
 - Selecting a dependency highlights the instructions that interfere with it (its `interferences`) in the code, and lists them in the editor heading.
 - Init edges run from init to every instruction, so "Show all dependencies" leaves them out. Click the `define` line to enter init mode: hovering an instruction previews its init edge, and clicking selects it. Esc or another click on `define` leaves init mode. Annotated init edges stay visible.
 - Select a dependency to edit its assertion in the editor below the graph (default: empty); drag its HTML frame vertically along the edge track. Focus the frame and use the up/down arrow keys to nudge it.
+- A data dependency into a `phi` has one assertion per incoming predecessor, because each path brings its value from a different source. Selecting it shows one editor per predecessor, and its label lists each non-empty assertion with its predecessor.
+- Assertions name the members of a `cmpxchg` result as `%r[0]` (the old value) and `%r[1]` (the success flag).
 - Choose **Save edits** to download a `.depvec-layout.json` file.
 - Use **Open edits** to restore those labels and positions along their edge tracks later.
 - Choose **Export graph** to download a v2 graph JSON with the current edge assertions written into each edge's `assertion` field. Empty labels are exported as empty assertions, which the backend treats as `true`.

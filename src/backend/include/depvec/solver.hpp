@@ -23,9 +23,11 @@ struct SolverResult {
 };
 
 // The complete symbol set available to one solver instance. These declarations
-// are fixed for that instance's lifetime.
+// are fixed for that instance's lifetime. variables and memoryLocations are
+// integers; booleanVariables are the i1 values.
 struct SolverSymbols {
   std::vector<ValueRef> variables;
+  std::vector<ValueRef> booleanVariables;
   std::vector<Pointer> memoryLocations;
 };
 

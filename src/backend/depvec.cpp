@@ -19,7 +19,7 @@ std::string formatExpression(const depvec::Expression &expression) {
     if constexpr (std::is_same_v<Node, depvec::IntegerLiteral>) {
       return std::to_string(node.value);
     } else if constexpr (std::is_same_v<Node, depvec::Variable>) {
-      return "%" + node.value.name;
+      return "%" + depvec::valueText(node.value);
     } else if constexpr (std::is_same_v<Node, depvec::Dereference>) {
       return std::visit([](const auto &pointer) {
         using Pointer = std::decay_t<decltype(pointer)>;
@@ -45,6 +45,8 @@ std::string formatFormula(const depvec::Formula &formula) {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, depvec::BooleanLiteral>) {
       return node.value ? "true" : "false";
+    } else if constexpr (std::is_same_v<Node, depvec::BooleanVariable>) {
+      return "%" + depvec::valueText(node.value);
     } else if constexpr (std::is_same_v<Node, depvec::ComparisonFormula>) {
       return "(" + formatExpression(*node.left) + " " +
              std::string(depvec::operatorText(node.op)) + " " +
@@ -137,6 +139,9 @@ int main(int argc, char **argv) {
           std::cout << edge.values[index];
         }
         std::cout << "] assertion: " << formatFormula(edge.assertion) << '\n';
+        for (const auto &path : edge.incomingAssertions)
+          std::cout << "    from " << path.predecessor << " (n" << path.source
+                    << "): " << formatFormula(path.assertion) << '\n';
       }
     }
   } catch (const std::exception &error) {

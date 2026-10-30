@@ -8,7 +8,9 @@
 namespace depvec {
 namespace {
 
-std::string valueKey(const ValueRef &value) { return "value:" + value.name; }
+std::string valueKey(const ValueRef &value) {
+  return "value:" + valueText(value);
+}
 
 std::string pointerKey(const Pointer &pointer) {
   return std::visit([](const auto &reference) {
@@ -20,50 +22,52 @@ std::string pointerKey(const Pointer &pointer) {
   }, pointer);
 }
 
-void collectExpressionSymbols(
-    const Expression &expression, std::map<std::string, ValueRef> &variables,
-    std::map<std::string, Pointer> &memoryLocations) {
+// Symbols keyed for deduplication, in a stable order.
+struct SymbolMaps {
+  std::map<std::string, ValueRef> variables;
+  std::map<std::string, ValueRef> booleanVariables;
+  std::map<std::string, Pointer> memoryLocations;
+};
+
+void collectExpressionSymbols(const Expression &expression, SymbolMaps &symbols) {
   std::visit([&](const auto &node) {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, Variable>) {
-      variables.emplace(valueKey(node.value), node.value);
+      symbols.variables.emplace(valueKey(node.value), node.value);
     } else if constexpr (std::is_same_v<Node, Dereference>) {
-      memoryLocations.emplace(pointerKey(node.pointer), node.pointer);
+      symbols.memoryLocations.emplace(pointerKey(node.pointer), node.pointer);
     } else if constexpr (std::is_same_v<Node, ArithmeticUnaryExpression>) {
-      collectExpressionSymbols(*node.operand, variables, memoryLocations);
+      collectExpressionSymbols(*node.operand, symbols);
     } else if constexpr (std::is_same_v<Node, ArithmeticBinaryExpression>) {
-      collectExpressionSymbols(*node.left, variables, memoryLocations);
-      collectExpressionSymbols(*node.right, variables, memoryLocations);
+      collectExpressionSymbols(*node.left, symbols);
+      collectExpressionSymbols(*node.right, symbols);
     }
   }, expression.node);
 }
 
-void collectFormulaSymbols(
-    const Formula &formula, std::map<std::string, ValueRef> &variables,
-    std::map<std::string, Pointer> &memoryLocations) {
+void collectFormulaSymbols(const Formula &formula, SymbolMaps &symbols) {
   std::visit([&](const auto &node) {
     using Node = std::decay_t<decltype(node)>;
-    if constexpr (std::is_same_v<Node, ComparisonFormula>) {
-      collectExpressionSymbols(*node.left, variables, memoryLocations);
-      collectExpressionSymbols(*node.right, variables, memoryLocations);
+    if constexpr (std::is_same_v<Node, BooleanVariable>) {
+      symbols.booleanVariables.emplace(valueKey(node.value), node.value);
+    } else if constexpr (std::is_same_v<Node, ComparisonFormula>) {
+      collectExpressionSymbols(*node.left, symbols);
+      collectExpressionSymbols(*node.right, symbols);
     } else if constexpr (std::is_same_v<Node, LogicalFormula>) {
-      collectFormulaSymbols(*node.left, variables, memoryLocations);
-      collectFormulaSymbols(*node.right, variables, memoryLocations);
+      collectFormulaSymbols(*node.left, symbols);
+      collectFormulaSymbols(*node.right, symbols);
     } else if constexpr (std::is_same_v<Node, NegationFormula>) {
-      collectFormulaSymbols(*node.operand, variables, memoryLocations);
+      collectFormulaSymbols(*node.operand, symbols);
     }
   }, formula.node);
 }
 
 template <typename Node>
-void collectNodeSymbols(const Node &node,
-                        std::map<std::string, ValueRef> &variables,
-                        std::map<std::string, Pointer> &memoryLocations) {
+void collectNodeSymbols(const Node &node, SymbolMaps &symbols) {
   if (node.precondition)
-    collectFormulaSymbols(*node.precondition, variables, memoryLocations);
+    collectFormulaSymbols(*node.precondition, symbols);
   if (node.weakest_precondition)
-    collectFormulaSymbols(*node.weakest_precondition, variables,
-                          memoryLocations);
+    collectFormulaSymbols(*node.weakest_precondition, symbols);
 }
 
 template <typename Node>
@@ -106,19 +110,21 @@ void checkNode(Node &node, Solver &solver) {
 } // namespace
 
 SolverSymbols verificationSymbols(const FunctionDFG &function) {
-  std::map<std::string, ValueRef> variables;
-  std::map<std::string, Pointer> memoryLocations;
+  SymbolMaps maps;
   for (const GraphNode &graphNode : function.nodes)
-    std::visit([&](const auto &node) {
-      collectNodeSymbols(node, variables, memoryLocations);
-    }, graphNode);
+    std::visit([&](const auto &node) { collectNodeSymbols(node, maps); },
+               graphNode);
 
   SolverSymbols symbols;
-  for (auto &[key, value] : variables) {
+  for (auto &[key, value] : maps.variables) {
     (void)key;
     symbols.variables.push_back(std::move(value));
   }
-  for (auto &[key, pointer] : memoryLocations) {
+  for (auto &[key, value] : maps.booleanVariables) {
+    (void)key;
+    symbols.booleanVariables.push_back(std::move(value));
+  }
+  for (auto &[key, pointer] : maps.memoryLocations) {
     (void)key;
     symbols.memoryLocations.push_back(std::move(pointer));
   }

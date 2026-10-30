@@ -1,5 +1,6 @@
 #include "GraphSerialization.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -329,6 +330,27 @@ json::Object serializeFunction(const Function &F,
     SerializedEdge["kind"] = Edge.kind;
     SerializedEdge["values"] = std::move(Values);
     SerializedEdge["assertion"] = "";
+    // A data edge into a phi gets one assertion per predecessor, with the
+    // source of that predecessor's incoming value. InterferenceAnalysis has
+    // already rejected constant incoming values.
+    const auto *Phi = dyn_cast_or_null<PHINode>(Graph.nodes[Edge.target].instruction);
+    if (Phi && Edge.kind == "data") {
+      json::Array Incoming;
+      SmallPtrSet<const BasicBlock *, 4> Seen;
+      for (unsigned K = 0; K < Phi->getNumIncomingValues(); ++K) {
+        const BasicBlock *Pred = Phi->getIncomingBlock(K);
+        if (!Seen.insert(Pred).second)
+          continue;
+        const Value *IncomingValue = Phi->getIncomingValue(K);
+        const auto *Def = dyn_cast<Instruction>(IncomingValue);
+        json::Object Entry;
+        Entry["predecessor"] = getLocalName(*Pred);
+        Entry["source"] = Def ? Graph.getNodeId(Def) : Graph.initNodeId;
+        Entry["assertion"] = "";
+        Incoming.push_back(std::move(Entry));
+      }
+      SerializedEdge["incomingAssertions"] = std::move(Incoming);
+    }
     SerializedEdge["interferences"] = std::move(Interferences);
     Edges.push_back(std::move(SerializedEdge));
   }

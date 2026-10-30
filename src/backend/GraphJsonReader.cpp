@@ -18,15 +18,28 @@ namespace {
 
 using Json = nlohmann::json;
 
+// types records the i1 values, which assertions treat as formulas, and the
+// cmpxchg results, which assertions name only through their members. All other
+// values are integers, whatever their bit width.
 struct InstructionReferences {
   std::unordered_set<std::string> values;
+  ValueTypes types;
   std::unordered_set<std::string> allocas;
   std::unordered_set<std::string> globals;
 };
 
-void collectValue(const Value &value, InstructionReferences &references) {
-  if (const auto *ref = std::get_if<ValueRef>(&value))
+void collectValue(const Value &value, InstructionReferences &references,
+                  bool boolean = false) {
+  if (const auto *ref = std::get_if<ValueRef>(&value)) {
     references.values.insert(ref->name);
+    if (boolean)
+      references.types.booleans.insert(ref->name);
+  }
+}
+
+void collectResult(const ValueRef &result, IntegerType type,
+                   InstructionReferences &references) {
+  collectValue(result, references, type.bitWidth == 1);
 }
 
 void collectPointer(const Pointer &pointer, InstructionReferences &references) {
@@ -47,41 +60,47 @@ InstructionReferences collectInstructionReferences(const FunctionDFG &function) 
       instruction = &node->instruction;
     else if (const auto *branch = std::get_if<BranchNode>(&graphNode)) {
       if (branch->instruction.condition)
-        collectValue(*branch->instruction.condition, references);
+        collectValue(*branch->instruction.condition, references, true);
       continue;
     }
     if (!instruction) continue;
     std::visit([&](const auto &instruction) {
       using Op = std::decay_t<decltype(instruction)>;
-      if constexpr (std::is_same_v<Op, IntegerBinaryInstruction> ||
-                    std::is_same_v<Op, IntegerCompareInstruction>) {
-        references.values.insert(instruction.result.name);
-        collectValue(instruction.left, references);
-        collectValue(instruction.right, references);
+      if constexpr (std::is_same_v<Op, IntegerBinaryInstruction>) {
+        collectResult(instruction.result, instruction.type, references);
+        collectValue(instruction.left, references, instruction.type.bitWidth == 1);
+        collectValue(instruction.right, references, instruction.type.bitWidth == 1);
+      } else if constexpr (std::is_same_v<Op, IntegerCompareInstruction>) {
+        collectValue(instruction.result, references, true);
+        const bool boolean = instruction.operandType.bitWidth == 1;
+        collectValue(instruction.left, references, boolean);
+        collectValue(instruction.right, references, boolean);
       } else if constexpr (std::is_same_v<Op, AllocaInstruction>) {
         references.values.insert(instruction.result.allocaSite);
         references.allocas.insert(instruction.result.allocaSite);
       } else if constexpr (std::is_same_v<Op, LoadInstruction>) {
-        references.values.insert(instruction.result.name);
+        collectResult(instruction.result, instruction.type, references);
         collectPointer(instruction.pointer, references);
       } else if constexpr (std::is_same_v<Op, StoreInstruction>) {
-        collectValue(instruction.value, references);
+        collectValue(instruction.value, references, instruction.type.bitWidth == 1);
         collectPointer(instruction.pointer, references);
       } else if constexpr (std::is_same_v<Op, CompareExchangeInstruction>) {
         references.values.insert(instruction.result.name);
+        references.types.aggregates[instruction.result.name] = {
+            ScalarType::Integer, ScalarType::Boolean};
         collectPointer(instruction.pointer, references);
         collectValue(instruction.expected, references);
         collectValue(instruction.replacement, references);
       } else if constexpr (std::is_same_v<Op, ExtractValueInstruction>) {
-        references.values.insert(instruction.result.name);
+        collectResult(instruction.result, instruction.resultType, references);
         references.values.insert(instruction.aggregate.name);
       } else if constexpr (std::is_same_v<Op, BranchInstruction>) {
         if (instruction.condition)
-          collectValue(*instruction.condition, references);
+          collectValue(*instruction.condition, references, true);
       } else if constexpr (std::is_same_v<Op, PhiInstruction>) {
-        references.values.insert(instruction.result.name);
+        collectResult(instruction.result, instruction.type, references);
         for (const PhiIncoming &incoming : instruction.incoming)
-          collectValue(incoming.value, references);
+          collectValue(incoming.value, references, instruction.type.bitWidth == 1);
       }
     }, instruction->node);
   }
@@ -126,6 +145,10 @@ void validateFormulaReferences(const Formula &formula,
     if constexpr (std::is_same_v<Expr, ComparisonFormula>) {
       validateExpressionReferences(*node.left, references, context);
       validateExpressionReferences(*node.right, references, context);
+    } else if constexpr (std::is_same_v<Expr, BooleanVariable>) {
+      if (!references.values.count(node.value.name))
+        throw std::runtime_error(context + ": assertion references unknown LLVM value '%" +
+                                 node.value.name + "'");
     } else if constexpr (std::is_same_v<Expr, LogicalFormula>) {
       validateFormulaReferences(*node.left, references, context);
       validateFormulaReferences(*node.right, references, context);
@@ -433,7 +456,21 @@ std::vector<NodeId> nodeIdArrayField(const Json &value, const char *name,
   return ids;
 }
 
-DependencyEdge parseEdge(const Json &value, const std::string &functionName) {
+// An empty assertion is true.
+FormulaPtr assertionField(const Json &object, const ValueTypes &types,
+                          const std::string &context) {
+  const std::string assertion = stringField(object, "assertion", context);
+  if (assertion.empty())
+    return std::make_shared<Formula>(Formula{BooleanLiteral{true}});
+  try {
+    return parseAssertion(assertion, types);
+  } catch (const std::exception &error) {
+    throw std::runtime_error(context + " assertion: " + error.what());
+  }
+}
+
+DependencyEdge parseEdge(const Json &value, const std::string &functionName,
+                         const ValueTypes &types) {
   const std::string context = "function '" + functionName + "' edge";
   DependencyEdge edge;
   edge.id = stringField(value, "id", context);
@@ -448,16 +485,24 @@ DependencyEdge parseEdge(const Json &value, const std::string &functionName) {
       throw std::runtime_error(context + " '" + edge.id + "': values entries must be strings");
     edge.values.push_back(entry.get<std::string>());
   }
-  const std::string assertion =
-      stringField(value, "assertion", context + " '" + edge.id + "'");
-  if (assertion.empty())
-    edge.assertion = std::make_shared<Formula>(Formula{BooleanLiteral{true}});
-  else {
-    try {
-      edge.assertion = parseAssertion(assertion);
-    } catch (const std::exception &error) {
-      throw std::runtime_error(context + " '" + edge.id + "' assertion: " +
-                               error.what());
+  const std::string edgeContext = context + " '" + edge.id + "'";
+  edge.assertion = assertionField(value, types, edgeContext);
+  if (value.contains("incomingAssertions")) {
+    if (!stringField(value, "assertion", edgeContext).empty())
+      throw std::runtime_error(edgeContext +
+                               ": a phi edge keeps its assertions per incoming path");
+    const Json &incoming = value.at("incomingAssertions");
+    if (!incoming.is_array() || incoming.empty())
+      throw std::runtime_error(edgeContext +
+                               ": incomingAssertions must be a non-empty array");
+    for (const Json &entry : incoming) {
+      IncomingAssertion parsed;
+      parsed.predecessor = stringField(entry, "predecessor", edgeContext);
+      const std::string entryContext =
+          edgeContext + " incoming from '" + parsed.predecessor + "'";
+      parsed.source = unsignedField(entry, "source", entryContext);
+      parsed.assertion = assertionField(entry, types, entryContext);
+      edge.incomingAssertions.push_back(std::move(parsed));
     }
   }
   edge.interferences =
@@ -470,6 +515,17 @@ FormulaPtr conjunctionOfAssertions(const FunctionDFG &function,
   FormulaPtr result =
       std::make_shared<Formula>(Formula{BooleanLiteral{true}});
   for (const DependencyEdge &edge : function.edges) {
+    // A phi's weakest precondition accounts for its incoming assertions, and
+    // each source establishes only the assertion of its own path.
+    if (!edge.incomingAssertions.empty()) {
+      if (incoming)
+        continue;
+      for (const IncomingAssertion &path : edge.incomingAssertions)
+        if (path.source == nodeId)
+          result = std::make_shared<Formula>(Formula{LogicalFormula{
+              LogicalOperator::And, std::move(result), path.assertion}});
+      continue;
+    }
     const bool connected = incoming
         ? edge.target == nodeId
         : std::find(edge.sources.begin(), edge.sources.end(), nodeId) !=
@@ -503,6 +559,84 @@ FormulaPtr conjunctionOfBranchAssertions(const FunctionDFG &function,
         LogicalOperator::And, std::move(result), assertion}});
   }
   return result;
+}
+
+// The node that defines a local value: the instruction whose result it is,
+// or init for a function argument.
+NodeId definingNode(const FunctionDFG &function, const std::string &name) {
+  NodeId init = 0;
+  for (const GraphNode &graphNode : function.nodes) {
+    if (const auto *initNode = std::get_if<InitNode>(&graphNode))
+      init = initNode->id;
+    const auto *node = std::get_if<InstructionNode>(&graphNode);
+    if (!node)
+      continue;
+    const bool defines = std::visit([&](const auto &instruction) {
+      using Op = std::decay_t<decltype(instruction)>;
+      if constexpr (std::is_same_v<Op, AllocaInstruction> ||
+                    std::is_same_v<Op, StoreInstruction> ||
+                    std::is_same_v<Op, BranchInstruction>)
+        return false;
+      else
+        return instruction.result.name == name;
+    }, node->instruction.node);
+    if (defines)
+      return node->id;
+  }
+  return init;
+}
+
+// A data edge into a phi lists one incoming assertion per predecessor, each
+// with the source that defines that predecessor's incoming value.
+void validateIncomingAssertions(const FunctionDFG &function,
+                                const DependencyEdge &edge) {
+  const std::string context =
+      "function '" + function.name + "' edge '" + edge.id + "'";
+  const PhiInstruction *phi = nullptr;
+  for (const GraphNode &graphNode : function.nodes) {
+    const auto *node = std::get_if<InstructionNode>(&graphNode);
+    if (node && node->id == edge.target)
+      phi = std::get_if<PhiInstruction>(&node->instruction.node);
+  }
+  if (!phi || edge.kind != "data") {
+    if (!edge.incomingAssertions.empty())
+      throw std::runtime_error(context +
+                               ": only a data edge into a phi has incoming assertions");
+    return;
+  }
+
+  std::unordered_set<std::string> predecessors;
+  for (const PhiIncoming &incoming : phi->incoming)
+    predecessors.insert(incoming.predecessor.name);
+  std::unordered_set<std::string> listed;
+  for (const IncomingAssertion &path : edge.incomingAssertions) {
+    if (!predecessors.count(path.predecessor))
+      throw std::runtime_error(context + ": '" + path.predecessor +
+                               "' is not a predecessor of the phi");
+    if (!listed.insert(path.predecessor).second)
+      throw std::runtime_error(context + ": predecessor '" + path.predecessor +
+                               "' is listed twice");
+    if (std::find(edge.sources.begin(), edge.sources.end(), path.source) ==
+        edge.sources.end())
+      throw std::runtime_error(context + ": incoming source " +
+                               std::to_string(path.source) +
+                               " is not a source of the edge");
+    for (const PhiIncoming &incoming : phi->incoming) {
+      const auto *value = std::get_if<ValueRef>(&incoming.value);
+      if (incoming.predecessor.name != path.predecessor || !value)
+        continue;
+      const NodeId expected = definingNode(function, value->name);
+      if (expected != path.source)
+        throw std::runtime_error(context + ": the value from '" +
+                                 path.predecessor + "' is defined by node " +
+                                 std::to_string(expected) + ", not node " +
+                                 std::to_string(path.source));
+    }
+  }
+  if (listed.size() != predecessors.size())
+    throw std::runtime_error(context +
+                             ": a data edge into a phi needs an incoming assertion "
+                             "for each predecessor");
 }
 
 FunctionDFG parseFunction(const Json &value) {
@@ -563,10 +697,17 @@ FunctionDFG parseFunction(const Json &value) {
 
   std::unordered_set<std::string> edgeIds;
   for (const Json &edgeValue : edges) {
-    DependencyEdge edge = parseEdge(edgeValue, function.name);
+    DependencyEdge edge =
+        parseEdge(edgeValue, function.name, instructionReferences.types);
     validateFormulaReferences(
         *edge.assertion, instructionReferences,
         "function '" + function.name + "' edge '" + edge.id + "' assertion");
+    for (const IncomingAssertion &path : edge.incomingAssertions)
+      validateFormulaReferences(
+          *path.assertion, instructionReferences,
+          "function '" + function.name + "' edge '" + edge.id +
+              "' incoming assertion from '" + path.predecessor + "'");
+    validateIncomingAssertions(function, edge);
     if (!edgeIds.insert(edge.id).second)
       throw std::runtime_error("function '" + function.name + "': duplicate edge ID '" +
                                edge.id + "'");

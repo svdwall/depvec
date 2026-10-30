@@ -27,11 +27,13 @@ formulaUnary
     | formulaPrimary
     ;
 
+// A bare local value is an i1 value. The AST builder checks the types.
 formulaPrimary
     : TRUE
     | FALSE
     | pointsTo
     | comparison
+    | localValue
     | LPAREN formula RPAREN
     ;
 
@@ -58,14 +60,23 @@ unary
 
 primary
     : Integer
+    | TRUE
+    | FALSE
     | STAR (LocalIdentifier | GlobalIdentifier)
-    | LocalIdentifier
+    | localValue
     | GlobalIdentifier
     | LPAREN additive RPAREN
     ;
 
+// A local value, or one scalar member of a flat aggregate such as %r[0].
+localValue
+    : LocalIdentifier (LBRACKET Integer RBRACKET)?
+    ;
+
 LBRACE   : '{' ;
 RBRACE   : '}' ;
+LBRACKET : '[' ;
+RBRACKET : ']' ;
 LPAREN   : '(' ;
 RPAREN   : ')' ;
 OR       : '||' ;

@@ -166,6 +166,9 @@ main { width: min(1760px, 100%); margin: 0 auto; padding: 0 clamp(12px, 1.8vw, 2
 .edge-kind-label { flex: 0 1 auto; max-width: 72px; overflow: hidden; color: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .edge-assertion-label { display: flex; align-items: stretch; justify-content: center; overflow: visible; min-width: 0; flex: 1 1 auto; color: inherit; cursor: inherit; }
 .edge-label-text { display: block; min-width: 0; flex: 1 1 auto; color: inherit; text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
+.edge-assertion-label.incoming { flex-direction: column; gap: 2px; padding: 3px 0; }
+.edge-assertion-label.incoming > .edge-label-text { text-align: left; }
+.edge-label-tag { margin-right: 5px; padding: 0 3px; border-radius: 3px; color: #9fb0cf; background: #2c3a55; }
 .contract-node-label { position: absolute; display: flex; align-items: flex-start; gap: 7px; max-width: 280px; padding: 5px 7px; overflow: hidden; border: 1px solid #c7d0df; border-radius: 6px; color: #3b4962; background: #fff; font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 10px; line-height: 1.35; transform: translateY(-50%); }
 .contract-node-label-kind { flex: 0 0 auto; padding: 1px 4px; border-radius: 3px; color: #4e67e0; background: #eef1ff; font-size: 9px; font-weight: 700; }
 .contract-node-label.final .contract-node-label-kind { color: #14745e; background: #e7f6f1; }
@@ -180,6 +183,8 @@ main { width: min(1760px, 100%); margin: 0 auto; padding: 0 clamp(12px, 1.8vw, 2
 .inspector.has-edge-selection { flex-direction: row; align-items: flex-start; }
 .inspector.has-edge-selection .inspector-summary { flex: 0 1 34%; min-width: 190px; }
 .inspector.has-edge-selection .assertion-editor { flex: 1 1 0; min-width: 0; grid-template-columns: 62px minmax(0, 1fr); padding: 2px 0 5px; }
+.assertion-editors { display: flex; flex: 1 1 0; flex-direction: column; gap: 4px; min-width: 0; }
+.inspector.has-edge-selection .assertion-editors .assertion-editor { flex: none; grid-template-columns: 112px minmax(0, 1fr); }
 .assertion-editor-title { padding-top: 7px; color: #71809a; font-size: 10px; font-weight: 600; }
 .assertion-editor-control { position: relative; min-width: 0; }
 .assertion-editor-input { position: relative; z-index: 1; display: block; width: 100%; min-height: 52px; padding: 8px 9px; border: 1px solid #dce2ed; border-radius: 6px; color: transparent; caret-color: #34415a; background: transparent; font: 10px/1.45 ui-monospace, 'SFMono-Regular', Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; resize: vertical; }
@@ -222,6 +227,7 @@ main { width: min(1760px, 100%); margin: 0 auto; padding: 0 clamp(12px, 1.8vw, 2
 :root[data-theme="light"] .init-armed .ir-line.is-node:hover { box-shadow: inset 0 0 0 1px #6f86c4; }
 :root[data-theme="light"] .ir-code ::selection { color: #18243a; background: #cfd8f0; }
 :root[data-theme="light"] .edge-label-frame { color: #3b4962; background: #fff; border-color: #c7d0df; }
+:root[data-theme="light"] .edge-label-tag { color: #56637c; background: #e8edf6; }
 :root[data-theme="light"] .edge-label-frame.selected,
 :root[data-theme="light"] .edge-label-frame:hover { background: #edf1ff; border-color: #7489e6; }
 :root[data-theme="light"] .contract-node-label { border-color: #c7d0df; color: #3b4962; background: #fff; }

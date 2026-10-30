@@ -28,7 +28,7 @@ public:
 
 } // namespace
 
-FormulaPtr parseAssertion(std::string_view source) {
+FormulaPtr parseAssertion(std::string_view source, const ValueTypes &types) {
   const std::string sourceText(source);
   antlr4::ANTLRInputStream input(sourceText);
   DepVecAssertionLexer lexer(&input);
@@ -49,7 +49,7 @@ FormulaPtr parseAssertion(std::string_view source) {
     throw std::runtime_error("invalid assertion: " + diagnostic);
   }
 
-  AssertionAstBuilder builder;
+  AssertionAstBuilder builder(types);
   return builder.build(tree).formula;
 }
 

@@ -1,9 +1,12 @@
 #include "depvec/assertion_ast_builder.hpp"
 
 #include <any>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <utility>
+#include <vector>
 
 namespace depvec {
 namespace {
@@ -51,9 +54,24 @@ FormulaPtr makeLogical(LogicalOperator op, FormulaPtr left, FormulaPtr right) {
 FormulaPtr makeNegation(FormulaPtr operand) {
   return std::make_shared<Formula>(Formula{NegationFormula{std::move(operand)}});
 }
+FormulaPtr makeBooleanVariable(ValueRef value) {
+  return std::make_shared<Formula>(Formula{BooleanVariable{std::move(value)}});
+}
 
 template <typename T> T as(antlrcpp::Any value) {
   return std::any_cast<T>(std::move(value));
+}
+
+// Expression visitors return an ExpressionPtr for integers and a FormulaPtr for
+// i1 values and boolean literals.
+bool isBoolean(const antlrcpp::Any &value) {
+  return value.type() == typeid(FormulaPtr);
+}
+
+ExpressionPtr integerOperand(antlrcpp::Any value, const char *use) {
+  if (isBoolean(value))
+    throw std::runtime_error(std::string("a boolean value cannot be used ") + use);
+  return as<ExpressionPtr>(std::move(value));
 }
 
 std::size_t tokenTypeAt(antlr4::tree::ParseTree *tree) {
@@ -117,6 +135,13 @@ antlrcpp::Any AssertionAstBuilder::visitFormulaPrimary(
   if (context->FALSE()) return makeBoolean(false);
   if (context->pointsTo()) return visit(context->pointsTo());
   if (context->comparison()) return visit(context->comparison());
+  if (context->localValue()) {
+    antlrcpp::Any value = visit(context->localValue());
+    if (!isBoolean(value))
+      throw std::runtime_error("'%" + context->localValue()->getText() +
+                               "' is not an i1 value, so it is not a formula");
+    return value;
+  }
   return visit(context->formula());
 }
 
@@ -127,7 +152,8 @@ antlrcpp::Any AssertionAstBuilder::visitPointsTo(
       ? context->GlobalIdentifier()->getText()
       : context->AllocaIdentifier()->getText();
   ExpressionPtr location = makeDereference(makePointer(pointerName, global));
-  ExpressionPtr value = as<ExpressionPtr>(visit(context->additive()));
+  ExpressionPtr value =
+      integerOperand(visit(context->additive()), "as a memory value");
   return makeComparison(ComparisonOperator::Equal, std::move(location),
                         std::move(value));
 }
@@ -145,14 +171,27 @@ antlrcpp::Any AssertionAstBuilder::visitComparison(
   default: throw std::logic_error("unexpected comparison operator token");
   }
   const auto terms = context->additive();
-  return makeComparison(op, as<ExpressionPtr>(visit(terms[0])),
-                        as<ExpressionPtr>(visit(terms[1])));
+  antlrcpp::Any left = visit(terms[0]);
+  antlrcpp::Any right = visit(terms[1]);
+  if (isBoolean(left) && isBoolean(right)) {
+    if (op != ComparisonOperator::Equal && op != ComparisonOperator::NotEqual)
+      throw std::runtime_error("booleans can only be compared with = and !=");
+    FormulaPtr equal = makeLogical(LogicalOperator::Iff, as<FormulaPtr>(std::move(left)),
+                                   as<FormulaPtr>(std::move(right)));
+    if (op == ComparisonOperator::Equal) return equal;
+    return makeNegation(std::move(equal));
+  }
+  if (isBoolean(left) || isBoolean(right))
+    throw std::runtime_error("a boolean value cannot be compared with an integer");
+  return makeComparison(op, as<ExpressionPtr>(std::move(left)),
+                        as<ExpressionPtr>(std::move(right)));
 }
 
 antlrcpp::Any AssertionAstBuilder::visitAdditive(
     DepVecAssertionParser::AdditiveContext *context) {
   const auto terms = context->multiplicative();
-  ExpressionPtr result = as<ExpressionPtr>(visit(terms.front()));
+  if (terms.size() == 1) return visit(terms.front());
+  ExpressionPtr result = integerOperand(visit(terms.front()), "in arithmetic");
   for (std::size_t index = 1; index < terms.size(); ++index) {
     ArithmeticBinaryOperator op;
     switch (tokenTypeAt(context->children[2 * index - 1])) {
@@ -161,7 +200,7 @@ antlrcpp::Any AssertionAstBuilder::visitAdditive(
     default: throw std::logic_error("unexpected additive operator token");
     }
     result = makeBinary(op, std::move(result),
-                        as<ExpressionPtr>(visit(terms[index])));
+                        integerOperand(visit(terms[index]), "in arithmetic"));
   }
   return result;
 }
@@ -169,7 +208,8 @@ antlrcpp::Any AssertionAstBuilder::visitAdditive(
 antlrcpp::Any AssertionAstBuilder::visitMultiplicative(
     DepVecAssertionParser::MultiplicativeContext *context) {
   const auto terms = context->unary();
-  ExpressionPtr result = as<ExpressionPtr>(visit(terms.front()));
+  if (terms.size() == 1) return visit(terms.front());
+  ExpressionPtr result = integerOperand(visit(terms.front()), "in arithmetic");
   for (std::size_t index = 1; index < terms.size(); ++index) {
     ArithmeticBinaryOperator op;
     switch (tokenTypeAt(context->children[2 * index - 1])) {
@@ -178,7 +218,7 @@ antlrcpp::Any AssertionAstBuilder::visitMultiplicative(
     default: throw std::logic_error("unexpected multiplicative operator token");
     }
     result = makeBinary(op, std::move(result),
-                        as<ExpressionPtr>(visit(terms[index])));
+                        integerOperand(visit(terms[index]), "in arithmetic"));
   }
   return result;
 }
@@ -186,14 +226,19 @@ antlrcpp::Any AssertionAstBuilder::visitMultiplicative(
 antlrcpp::Any AssertionAstBuilder::visitUnary(
     DepVecAssertionParser::UnaryContext *context) {
   if (context->primary()) return visit(context->primary());
+  antlrcpp::Any operand = visit(context->unary());
+  if (isBoolean(operand) && context->NOT())
+    return makeNegation(as<FormulaPtr>(std::move(operand)));
   return makeUnary(ArithmeticUnaryOperator::Negate,
-                   as<ExpressionPtr>(visit(context->unary())));
+                   integerOperand(std::move(operand), "in arithmetic"));
 }
 
 antlrcpp::Any AssertionAstBuilder::visitPrimary(
     DepVecAssertionParser::PrimaryContext *context) {
   if (context->Integer())
     return makeInteger(std::stoll(context->Integer()->getText()));
+  if (context->TRUE()) return makeBoolean(true);
+  if (context->FALSE()) return makeBoolean(false);
   if (context->STAR()) {
     if (context->GlobalIdentifier())
       return makeDereference(makePointer(context->GlobalIdentifier()->getText(), true));
@@ -201,9 +246,34 @@ antlrcpp::Any AssertionAstBuilder::visitPrimary(
   }
   if (context->GlobalIdentifier())
     return makeVariable(ValueRef{withoutSigil(context->GlobalIdentifier()->getText())});
-  if (context->LocalIdentifier())
-    return makeVariable(ValueRef{withoutSigil(context->LocalIdentifier()->getText())});
+  if (context->localValue()) return visit(context->localValue());
   return visit(context->additive());
+}
+
+antlrcpp::Any AssertionAstBuilder::visitLocalValue(
+    DepVecAssertionParser::LocalValueContext *context) {
+  std::string name = withoutSigil(context->LocalIdentifier()->getText());
+  const auto aggregate = types_.aggregates.find(name);
+  if (!context->Integer()) {
+    if (aggregate != types_.aggregates.end())
+      throw std::runtime_error("'%" + name + "' is an aggregate; name one of " +
+                               "its members, such as %" + name + "[0]");
+    if (types_.booleans.count(name))
+      return makeBooleanVariable(ValueRef{std::move(name), {}});
+    return makeVariable(ValueRef{std::move(name), {}});
+  }
+
+  if (aggregate == types_.aggregates.end())
+    throw std::runtime_error("'%" + name + "' is not an aggregate, so it has no members");
+  const std::string indexText = context->Integer()->getText();
+  const std::vector<ScalarType> &members = aggregate->second;
+  if (indexText.size() > 9 || std::stoul(indexText) >= members.size())
+    throw std::runtime_error("'%" + name + "' has no member " + indexText);
+  const auto field = static_cast<std::uint32_t>(std::stoul(indexText));
+  ValueRef value{std::move(name), field};
+  if (members[field] == ScalarType::Boolean)
+    return makeBooleanVariable(std::move(value));
+  return makeVariable(std::move(value));
 }
 
 } // namespace depvec

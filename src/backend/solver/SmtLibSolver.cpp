@@ -8,7 +8,9 @@
 namespace depvec {
 namespace {
 
-std::string valueKey(const ValueRef &value) { return "value:" + value.name; }
+std::string valueKey(const ValueRef &value) {
+  return "value:" + valueText(value);
+}
 
 std::string pointerKey(const Pointer &pointer) {
   return std::visit([](const auto &reference) {
@@ -37,6 +39,8 @@ std::string encodeFormulaNode(const Formula &formula,
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, BooleanLiteral>) {
       return node.value ? "true" : "false";
+    } else if constexpr (std::is_same_v<Node, BooleanVariable>) {
+      return solver.symbolForValue(node.value);
     } else if constexpr (std::is_same_v<Node, ComparisonFormula>) {
       const char *op = nullptr;
       switch (node.op) {
@@ -58,6 +62,7 @@ std::string encodeFormulaNode(const Formula &formula,
       case LogicalOperator::And: op = "and"; break;
       case LogicalOperator::Or: op = "or"; break;
       case LogicalOperator::Implies: op = "=>"; break;
+      case LogicalOperator::Iff: op = "="; break;
       }
       if (!op)
         throw std::invalid_argument("unknown logical operator");
@@ -116,18 +121,20 @@ SmtLibSolver::SmtLibSolver(SolverSymbols symbols, SmtLibEngine &engine)
     : Solver(std::move(symbols)), engine_(engine) {
   std::string declarations;
   std::size_t index = 0;
-  auto addSymbol = [&](std::string key) {
+  auto addSymbol = [&](std::string key, const char *sort) {
     if (symbolsByKey_.find(key) != symbolsByKey_.end())
       return;
     const std::string symbol = symbolName(index++);
     symbolsByKey_.emplace(std::move(key), symbol);
-    declarations += "(declare-const " + symbol + " Int)\n";
+    declarations += "(declare-const " + symbol + " " + sort + ")\n";
   };
 
   for (const ValueRef &variable : symbols_.variables)
-    addSymbol(valueKey(variable));
+    addSymbol(valueKey(variable), "Int");
+  for (const ValueRef &variable : symbols_.booleanVariables)
+    addSymbol(valueKey(variable), "Bool");
   for (const Pointer &pointer : symbols_.memoryLocations)
-    addSymbol(pointerKey(pointer));
+    addSymbol(pointerKey(pointer), "Int");
 
   if (!declarations.empty()) {
     const std::string marker = freshMarker(nextMarker_++);
@@ -171,7 +178,7 @@ std::string SmtLibSolver::symbolForValue(const ValueRef &value) const {
   auto symbol = symbolsByKey_.find(valueKey(value));
   if (symbol == symbolsByKey_.end())
     throw std::invalid_argument("unregistered assertion variable '%" +
-                                value.name + "'");
+                                valueText(value) + "'");
   return symbol->second;
 }
 

@@ -47,8 +47,18 @@ written in a small formula language. Its ANTLR grammar is
   global.
 - Logic: `true`, `false`, `!`, `&&`, `||`, and `->`. Implication (`->`) binds
   loosest and associates to the right.
+- Types: bit widths are ignored, except that `i1` values are booleans. A
+  boolean value is a formula of its own (`%cmp`, `!%cmp`) and compares only
+  with `=` and `!=` (`%cmp = false`).
+- Members: a `cmpxchg` result `%r` is named only through its members, `%r[0]`
+  (the old value) and `%r[1]` (the success flag, a boolean).
 
 For example: `@ready |-> 1 -> @shared_value |-> 42`.
+
+A data edge into a `phi` gets its value from a different source on each path,
+so it has no assertion of its own. Instead, `incomingAssertions` holds one
+assertion per predecessor block, each with the source that defines that path's
+value.
 
 ## Project layout
 

@@ -2,6 +2,7 @@
 
 #include "depvec/dfg.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -61,7 +62,7 @@ ExpressionPtr substituteExpression(
   return std::visit([&](const auto &node) -> ExpressionPtr {
     using Expr = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Expr, Variable>) {
-      if (node.value.name == variable.name)
+      if (sameValue(node.value, variable))
         return replacement;
       return makeExpression(node);
     } else if constexpr (std::is_same_v<Expr, Dereference>) {
@@ -157,6 +158,70 @@ FormulaPtr substituteFormula(
   }, formula.node);
 }
 
+// Replaces the i1 value variable by a formula.
+FormulaPtr substituteBoolean(const Formula &formula, const ValueRef &variable,
+                             const FormulaPtr &replacement) {
+  return std::visit([&](const auto &node) -> FormulaPtr {
+    using Form = std::decay_t<decltype(node)>;
+    if constexpr (std::is_same_v<Form, BooleanVariable>) {
+      if (sameValue(node.value, variable))
+        return replacement;
+      return makeFormula(node);
+    } else if constexpr (std::is_same_v<Form, LogicalFormula>) {
+      return makeFormula(LogicalFormula{
+          node.op, substituteBoolean(*node.left, variable, replacement),
+          substituteBoolean(*node.right, variable, replacement)});
+    } else if constexpr (std::is_same_v<Form, NegationFormula>) {
+      return makeFormula(NegationFormula{
+          substituteBoolean(*node.operand, variable, replacement)});
+    } else {
+      return makeFormula(node);
+    }
+  }, formula.node);
+}
+
+ComparisonOperator comparisonOperator(IntegerPredicate predicate) {
+  switch (predicate) {
+  case IntegerPredicate::Equal: return ComparisonOperator::Equal;
+  case IntegerPredicate::NotEqual: return ComparisonOperator::NotEqual;
+  case IntegerPredicate::Greater: return ComparisonOperator::Greater;
+  case IntegerPredicate::GreaterEqual: return ComparisonOperator::GreaterEqual;
+  case IntegerPredicate::Less: return ComparisonOperator::Less;
+  case IntegerPredicate::LessEqual: return ComparisonOperator::LessEqual;
+  }
+  throw std::logic_error("unknown integer predicate");
+}
+
+// An i1 operand as a formula. The extractor prints constants as signed
+// decimals, so i1 true is -1.
+FormulaPtr booleanValue(const Value &value) {
+  if (const auto *ref = std::get_if<ValueRef>(&value))
+    return makeFormula(BooleanVariable{*ref});
+  const std::string &text = std::get<IntegerConstant>(value).value;
+  if (text == "-1" || text == "1") return makeFormula(BooleanLiteral{true});
+  if (text == "0") return makeFormula(BooleanLiteral{false});
+  throw std::invalid_argument("'" + text + "' is not an i1 constant");
+}
+
+FormulaPtr conjunction(FormulaPtr left, FormulaPtr right) {
+  return makeFormula(LogicalFormula{LogicalOperator::And, std::move(left),
+                                    std::move(right)});
+}
+
+FormulaPtr implication(FormulaPtr left, FormulaPtr right) {
+  return makeFormula(LogicalFormula{LogicalOperator::Implies, std::move(left),
+                                    std::move(right)});
+}
+
+// Bit widths are ignored, except that i1 values are booleans. Integer
+// operations on i1 have no counterpart in the assertion AST.
+void requireInteger(IntegerType type, const char *instruction) {
+  if (type.bitWidth == 1)
+    throw std::invalid_argument(
+        std::string("weakest precondition for ") + instruction +
+        " on i1 values is not supported");
+}
+
 ArithmeticBinaryOperator arithmeticOperator(IntegerBinaryOperator op) {
   switch (op) {
   case IntegerBinaryOperator::Add: return ArithmeticBinaryOperator::Add;
@@ -173,28 +238,137 @@ FormulaPtr weakestPrecondition(const Instruction &instruction,
   return std::visit([&](const auto &operation) -> FormulaPtr {
     using Op = std::decay_t<decltype(operation)>;
     if constexpr (std::is_same_v<Op, IntegerBinaryInstruction>) {
+      requireInteger(operation.type, "arithmetic");
       auto replacement = makeExpression(ArithmeticBinaryExpression{
           arithmeticOperator(operation.op), valueExpression(operation.left),
           valueExpression(operation.right)});
       return substituteFormula(postcondition, operation.result, replacement);
     } else if constexpr (std::is_same_v<Op, IntegerCompareInstruction>) {
-      throw std::invalid_argument(
-          "weakest precondition for integer comparisons is not supported by "
-          "the current assertion AST");
+      requireInteger(operation.operandType, "comparisons");
+      auto replacement = makeFormula(ComparisonFormula{
+          comparisonOperator(operation.predicate),
+          valueExpression(operation.left), valueExpression(operation.right)});
+      return substituteBoolean(postcondition, operation.result, replacement);
     } else if constexpr (std::is_same_v<Op, LoadInstruction>) {
+      requireInteger(operation.type, "loads");
       auto replacement = makeExpression(Dereference{operation.pointer});
       return substituteFormula(postcondition, operation.result, replacement);
     } else if constexpr (std::is_same_v<Op, StoreInstruction>) {
       // Stores update a location, so replace matching dereferences only.
+      requireInteger(operation.type, "stores");
       return substituteMemory(postcondition, operation.pointer,
                               valueExpression(operation.value));
+    } else if constexpr (std::is_same_v<Op, AllocaInstruction>) {
+      // An alloca assigns no value that an assertion can name.
+      return makeFormula(postcondition.node);
+    } else if constexpr (std::is_same_v<Op, ExtractValueInstruction>) {
+      // Field 0 is the old value and field 1 the success flag of a cmpxchg.
+      const ValueRef member{operation.aggregate.name, operation.index};
+      if (operation.index == 1)
+        return substituteBoolean(postcondition, operation.result,
+                                 makeFormula(BooleanVariable{member}));
+      return substituteFormula(postcondition, operation.result,
+                               makeExpression(Variable{member}));
+    } else if constexpr (std::is_same_v<Op, CompareExchangeInstruction>) {
+      requireInteger(operation.type, "cmpxchg");
+      const ValueRef old{operation.result.name, 0};
+      const ValueRef success{operation.result.name, 1};
+      const ExpressionPtr current = makeExpression(Dereference{operation.pointer});
+      // The result names the value before the exchange, so substitute it after
+      // any store: the dereferences left then refer to the old memory.
+      auto outcome = [&](const Formula &formula, bool succeeded) {
+        const FormulaPtr named = substituteFormula(formula, old, current);
+        return substituteBoolean(*named, success,
+                                 makeFormula(BooleanLiteral{succeeded}));
+      };
+      const FormulaPtr stored = substituteMemory(
+          postcondition, operation.pointer, valueExpression(operation.replacement));
+      const FormulaPtr matches = makeFormula(ComparisonFormula{
+          ComparisonOperator::Equal, current, valueExpression(operation.expected)});
+      const FormulaPtr onSuccess = implication(matches, outcome(*stored, true));
+      // A weak cmpxchg may fail even when the values match.
+      FormulaPtr onFailure = outcome(postcondition, false);
+      if (!operation.isWeak)
+        onFailure = implication(makeFormula(NegationFormula{matches}),
+                                std::move(onFailure));
+      return conjunction(onSuccess, std::move(onFailure));
+    } else if constexpr (std::is_same_v<Op, PhiInstruction>) {
+      throw std::invalid_argument(
+          "the weakest precondition of a phi needs its incoming assertions");
     } else {
       throw std::invalid_argument(
-          "weakest precondition is not implemented for this instruction "
-          "kind");
+          "the weakest precondition of a branch needs both postconditions");
     }
   }, instruction.node);
 }
+
+FormulaPtr weakestPreconditionOfBranch(const BranchInstruction &branch,
+                                       const Formula &truePostcondition,
+                                       const Formula &falsePostcondition) {
+  if (!branch.condition)
+    return makeFormula(truePostcondition.node);
+  // Each arm is guarded by its condition, so a path never continues with the
+  // other arm's postcondition.
+  const FormulaPtr condition = booleanValue(*branch.condition);
+  return makeFormula(LogicalFormula{
+      LogicalOperator::Or,
+      conjunction(condition, makeFormula(truePostcondition.node)),
+      conjunction(makeFormula(NegationFormula{condition}),
+                  makeFormula(falsePostcondition.node))});
+}
+
+FormulaPtr weakestPreconditionOfPhi(
+    const PhiInstruction &phi, const std::vector<IncomingAssertion> &incoming,
+    const Formula &postcondition) {
+  FormulaPtr result;
+  std::vector<std::string> seen;
+  for (const PhiIncoming &entry : phi.incoming) {
+    const std::string &predecessor = entry.predecessor.name;
+    if (std::find(seen.begin(), seen.end(), predecessor) != seen.end())
+      continue;
+    seen.push_back(predecessor);
+
+    FormulaPtr assertion = makeFormula(BooleanLiteral{true});
+    for (const IncomingAssertion &candidate : incoming)
+      if (candidate.predecessor == predecessor && candidate.assertion)
+        assertion = candidate.assertion;
+    const FormulaPtr path = phi.type.bitWidth == 1
+        ? substituteBoolean(postcondition, phi.result, booleanValue(entry.value))
+        : substituteFormula(postcondition, phi.result, valueExpression(entry.value));
+    FormulaPtr guarded = implication(std::move(assertion), path);
+    result = result.get() != nullptr
+                 ? conjunction(std::move(result), std::move(guarded))
+                 : std::move(guarded);
+  }
+  // FormulaPtr overloads ! to build a negation, so compare with nullptr.
+  if (result.get() == nullptr)
+    throw std::invalid_argument("phi has no incoming values");
+  return result;
+}
+
+namespace {
+
+// The incoming assertions of the data hyperedge into a phi node.
+std::vector<IncomingAssertion> incomingAssertionsOf(const FunctionDFG &function,
+                                                    NodeId phi) {
+  for (const DependencyEdge &edge : function.edges)
+    if (edge.target == phi && !edge.incomingAssertions.empty())
+      return edge.incomingAssertions;
+  return {};
+}
+
+template <typename Node, typename Compute>
+void computeInto(Node &node, Compute compute) {
+  try {
+    node.weakest_precondition = compute();
+    node.weakest_precondition_status = "computed";
+  } catch (const std::exception &error) {
+    node.weakest_precondition_status =
+        std::string("not computed: ") + error.what();
+  }
+}
+
+} // namespace
 
 void generateWeakestPreconditions(DFG &dfg) {
   for (FunctionDFG &function : dfg.functions) {
@@ -204,31 +378,40 @@ void generateWeakestPreconditions(DFG &dfg) {
         node.weakest_precondition_status.clear();
       }, graphNode);
 
+      if (auto *branchNode = std::get_if<BranchNode>(&graphNode)) {
+        if (branchNode->true_postcondition.get() == nullptr ||
+            branchNode->false_postcondition.get() == nullptr) {
+          branchNode->weakest_precondition_status = "postcondition is missing";
+          continue;
+        }
+        computeInto(*branchNode, [&] {
+          return weakestPreconditionOfBranch(branchNode->instruction,
+                                             *branchNode->true_postcondition,
+                                             *branchNode->false_postcondition);
+        });
+        continue;
+      }
+
       auto *instructionNode = std::get_if<InstructionNode>(&graphNode);
-      auto *branchNode = std::get_if<BranchNode>(&graphNode);
-      if (branchNode) {
-        branchNode->weakest_precondition_status = "branch instruction skipped";
-      } else if (!instructionNode) {
+      if (!instructionNode) {
         std::visit([](auto &node) {
           node.weakest_precondition_status = "not an instruction node";
         }, graphNode);
-      } else if (std::holds_alternative<BranchInstruction>(
-                     instructionNode->instruction.node)) {
-        instructionNode->weakest_precondition_status =
-            "branch instruction skipped";
       } else if (instructionNode->postcondition.get() == nullptr) {
         instructionNode->weakest_precondition_status =
             "postcondition is missing";
-      } else {
-        try {
-          instructionNode->weakest_precondition = weakestPrecondition(
-              instructionNode->instruction,
+      } else if (const auto *phi = std::get_if<PhiInstruction>(
+                     &instructionNode->instruction.node)) {
+        computeInto(*instructionNode, [&] {
+          return weakestPreconditionOfPhi(
+              *phi, incomingAssertionsOf(function, instructionNode->id),
               *instructionNode->postcondition);
-          instructionNode->weakest_precondition_status = "computed";
-        } catch (const std::exception &error) {
-          instructionNode->weakest_precondition_status =
-              std::string("not computed: ") + error.what();
-        }
+        });
+      } else {
+        computeInto(*instructionNode, [&] {
+          return weakestPrecondition(instructionNode->instruction,
+                                     *instructionNode->postcondition);
+        });
       }
     }
   }

@@ -21,7 +21,7 @@ function findIRVariables(ir) {
 
 function appendHighlightedAssertion(container, assertion, irVariables) {
   const text = String(assertion ?? '');
-  const tokenPattern = /\s+|\|->|->|&&|\|\||!=|<=|>=|\b(?:true|false)\b|%[A-Za-z_][A-Za-z_0-9.]*|%[0-9]+|@[A-Za-z_][A-Za-z_0-9.]*|@[0-9]+|[0-9]+|[A-Za-z_][A-Za-z_0-9.]*|[=<>+*/!()-]|[{}]|./gy;
+  const tokenPattern = /\s+|\|->|->|&&|\|\||!=|<=|>=|\b(?:true|false)\b|%(?:[A-Za-z_][A-Za-z_0-9.]*|[0-9]+)(?:\[[0-9]+\])?|@[A-Za-z_][A-Za-z_0-9.]*|@[0-9]+|[0-9]+|[A-Za-z_][A-Za-z_0-9.]*|[=<>+*/!()-]|[{}]|./gy;
   let index = 0;
   while (index < text.length) {
     tokenPattern.lastIndex = index;
@@ -33,7 +33,8 @@ function appendHighlightedAssertion(container, assertion, irVariables) {
     if (/^\s+$/.test(token)) type = 'whitespace';
     else if (/^(?:true|false)$/.test(token)) type = 'keyword';
     else if (/^(?:\|->|->|&&|\|\||!=|<=|>=|[=<>+*/!-])$/.test(token)) type = 'operator';
-    else if (/^%/.test(token)) type = irVariables.has(token) ? 'local' : 'invalid';
+    // A member such as %r[0] is checked by its base value.
+    else if (/^%/.test(token)) type = irVariables.has(token.replace(/\[[0-9]+\]$/, '')) ? 'local' : 'invalid';
     else if (/^@/.test(token)) type = irVariables.has(token) ? 'global' : 'invalid';
     else if (/^[0-9]+$/.test(token)) type = 'number';
     else if (/^[A-Za-z_]/.test(token)) type = irVariables.has(`%${token}`) ? 'alloca' : 'invalid';
@@ -751,43 +752,63 @@ function updateInspector(model) {
   if (selected?.type === 'edge') {
     const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
     if (!edge) return;
-    const editor = document.createElement('label');
-    editor.className = 'assertion-editor';
-    const editorTitle = document.createElement('span');
-    editorTitle.className = 'assertion-editor-title';
-    editorTitle.textContent = 'Assertion';
-    const editorControl = document.createElement('div');
-    editorControl.className = 'assertion-editor-control';
-    const highlight = document.createElement('div');
-    highlight.className = 'assertion-editor-highlight';
-    highlight.setAttribute('aria-hidden', 'true');
-    const highlightedText = document.createElement('pre');
-    highlightedText.className = 'assertion-editor-highlight-text';
-    highlight.append(highlightedText);
-    const input = document.createElement('textarea');
-    input.className = 'assertion-editor-input';
-    input.rows = 2;
-    input.maxLength = 100;
-    input.setAttribute('aria-label', `Assertion for ${edge.kind} hyperedge`);
-    const edgeLayout = getFunctionLayout(model.function.name).edges[String(edge.id)];
-    input.value = edgeLayout?.label ?? edge.assertion ?? '';
-    appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
-    input.addEventListener('scroll', () => {
-      highlightedText.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
-    });
-    input.addEventListener('input', () => {
-      highlightedText.replaceChildren();
-      appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
-      const currentLayout = getFunctionLayout(model.function.name).edges;
-      currentLayout[String(edge.id)] ||= {};
-      currentLayout[String(edge.id)].label = input.value;
-      updateEdgeVisibilityControl(model);
-      setupOverlay(model);
-    });
-    editorControl.append(highlight, input);
-    editor.append(editorTitle, editorControl);
-    inspector.append(editor);
+    const incoming = incomingAssertionsOf(edge);
+    if (!incoming) {
+      inspector.append(createAssertionEditor(model, 'Assertion', `Assertion for ${edge.kind} hyperedge`,
+        edgeLabelText(model, edge), (value) => { editedEdge(model, edge).label = value; }));
+      return;
+    }
+    // A phi takes its value from a different source on each path, so each
+    // predecessor gets its own assertion.
+    const editors = document.createElement('div');
+    editors.className = 'assertion-editors';
+    for (const path of incoming) {
+      editors.append(createAssertionEditor(model, `from ${path.predecessor} (n${path.source})`,
+        `Assertion for the path from ${path.predecessor}`, incomingAssertionText(model, edge, path),
+        (value) => {
+          const edited = editedEdge(model, edge);
+          edited.incomingLabels ||= {};
+          edited.incomingLabels[path.predecessor] = value;
+        }));
+    }
+    inspector.append(editors);
   }
+}
+
+function createAssertionEditor(model, title, ariaLabel, value, save) {
+  const editor = document.createElement('label');
+  editor.className = 'assertion-editor';
+  const editorTitle = document.createElement('span');
+  editorTitle.className = 'assertion-editor-title';
+  editorTitle.textContent = title;
+  const editorControl = document.createElement('div');
+  editorControl.className = 'assertion-editor-control';
+  const highlight = document.createElement('div');
+  highlight.className = 'assertion-editor-highlight';
+  highlight.setAttribute('aria-hidden', 'true');
+  const highlightedText = document.createElement('pre');
+  highlightedText.className = 'assertion-editor-highlight-text';
+  highlight.append(highlightedText);
+  const input = document.createElement('textarea');
+  input.className = 'assertion-editor-input';
+  input.rows = 2;
+  input.maxLength = 100;
+  input.setAttribute('aria-label', ariaLabel);
+  input.value = value;
+  appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
+  input.addEventListener('scroll', () => {
+    highlightedText.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
+  });
+  input.addEventListener('input', () => {
+    highlightedText.replaceChildren();
+    appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
+    save(input.value);
+    updateEdgeVisibilityControl(model);
+    setupOverlay(model);
+  });
+  editorControl.append(highlight, input);
+  editor.append(editorTitle, editorControl);
+  return editor;
 }
 
 function createLegend(edges) {
@@ -816,11 +837,47 @@ function createLegend(edges) {
   return legend;
 }
 
+// A data edge into a phi keeps one assertion per incoming predecessor instead
+// of a single one.
+function incomingAssertionsOf(edge) {
+  return Array.isArray(edge?.incomingAssertions) && edge.incomingAssertions.length
+    ? edge.incomingAssertions
+    : null;
+}
+
+function editedEdge(model, edge) {
+  const edges = getFunctionLayout(model.function.name).edges;
+  edges[String(edge.id)] ||= {};
+  return edges[String(edge.id)];
+}
+
+function edgeLabelText(model, edge) {
+  const savedLabel = getFunctionLayout(model.function.name).edges[String(edge.id)]?.label;
+  return String(savedLabel ?? edge.assertion ?? '');
+}
+
+function incomingAssertionText(model, edge, path) {
+  const saved = getFunctionLayout(model.function.name).edges[String(edge.id)]
+    ?.incomingLabels?.[path.predecessor];
+  return String(saved ?? path.assertion ?? '');
+}
+
+// The non-empty assertions shown on an edge's label, each tagged with its
+// predecessor on a phi edge.
+function edgeAssertionLines(model, edge) {
+  const incoming = incomingAssertionsOf(edge);
+  if (!incoming) {
+    const text = edgeLabelText(model, edge).trim();
+    return text ? [{ tag: null, text }] : [];
+  }
+  return incoming
+    .map((path) => ({ tag: path.predecessor, text: incomingAssertionText(model, edge, path).trim() }))
+    .filter((line) => line.text);
+}
+
 function edgeHasAssertion(model, edgeId) {
   const edge = model.function.edges.find((candidate) => String(candidate.id) === String(edgeId));
-  if (!edge) return false;
-  const savedLabel = getFunctionLayout(model.function.name).edges[String(edge.id)]?.label;
-  return String(savedLabel ?? edge.assertion ?? '').trim().length > 0;
+  return Boolean(edge) && edgeAssertionLines(model, edge).length > 0;
 }
 
 function isInitEdge(edge) {
@@ -1042,13 +1099,15 @@ function drawOverlay(model) {
     const color = edgeColor(edge.kind);
 
     const edgeLayout = layout.edges[String(edge.id)];
-    const customLabel = edgeLayout.label ?? edge.assertion ?? '';
+    const assertionLines = edgeAssertionLines(model, edge);
+    const lineText = (line) => (line.tag ? `${line.tag}: ${line.text}` : line.text);
+    const longestLine = assertionLines.map(lineText).reduce((a, b) => (b.length > a.length ? b : a), '');
     const kindText = String(edge.kind || 'dependency');
-    const hasAssertion = edgeHasAssertion(model, edge.id);
+    const hasAssertion = assertionLines.length > 0;
     const showKind = !hasAssertion;
     const showAssertion = hasAssertion;
-    const fullLabel = showAssertion ? customLabel : showKind ? kindText : 'Selected dependency';
-    const labelWidth = edgeLabelWidth(edge.kind, customLabel, showKind, showAssertion);
+    const fullLabel = showAssertion ? assertionLines.map(lineText).join('\n') : kindText;
+    const labelWidth = edgeLabelWidth(edge.kind, longestLine, showKind, showAssertion);
     const labelY = edgeLayout.y;
     const labelLeft = labelRight - labelWidth;
 
@@ -1130,15 +1189,22 @@ function drawOverlay(model) {
       kindLabel.style.color = color;
       labelFrame.append(kindLabel);
     }
-    let labelText;
-    let assertionLabel;
     if (showAssertion) {
-      assertionLabel = document.createElement('span');
+      const assertionLabel = document.createElement('span');
       assertionLabel.className = 'edge-assertion-label';
-      labelText = document.createElement('span');
-      labelText.className = 'edge-label-text';
-      appendHighlightedAssertion(labelText, customLabel, model.irVariables);
-      assertionLabel.append(labelText);
+      if (incomingAssertionsOf(edge)) assertionLabel.classList.add('incoming');
+      for (const line of assertionLines) {
+        const labelText = document.createElement('span');
+        labelText.className = 'edge-label-text';
+        if (line.tag) {
+          const tag = document.createElement('span');
+          tag.className = 'edge-label-tag';
+          tag.textContent = line.tag;
+          labelText.append(tag);
+        }
+        appendHighlightedAssertion(labelText, line.text, model.irVariables);
+        assertionLabel.append(labelText);
+      }
       labelFrame.append(assertionLabel);
     }
     model.labelLayer.append(labelFrame);
@@ -1357,10 +1423,15 @@ function exportGraph() {
   for (const fn of graph.functions) {
     const editedEdges = state.layoutDoc.functions?.[fn.name]?.edges || {};
     for (const edge of fn.edges) {
-      const editedAssertion = editedEdges[String(edge.id)]?.label;
+      const edited = editedEdges[String(edge.id)];
+      const editedAssertion = edited?.label;
       edge.assertion = editedAssertion === undefined
         ? String(edge.assertion || '').trim()
         : String(editedAssertion).trim();
+      for (const path of incomingAssertionsOf(edge) || []) {
+        const editedPath = edited?.incomingLabels?.[path.predecessor];
+        path.assertion = String(editedPath ?? path.assertion ?? '').trim();
+      }
       if (!Array.isArray(edge.interferences)) edge.interferences = [];
     }
   }

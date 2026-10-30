@@ -2,13 +2,18 @@
 #define DEPVEC_ASSERTION_AST_BUILDER_HPP
 
 #include "depvec/assertion_ast.hpp"
+#include "depvec/value_types.hpp"
 
 #include "DepVecAssertionBaseVisitor.h"
 
 namespace depvec {
 
+// Builds the AST for one assertion. Boolean local values (LLVM type i1)
+// become formulas; integer values become expressions.
 class AssertionAstBuilder : public DepVecAssertionBaseVisitor {
 public:
+  explicit AssertionAstBuilder(const ValueTypes &types) : types_(types) {}
+
   AssertionAst build(DepVecAssertionParser::AssertionContext *context);
 
   antlrcpp::Any visitFormula(
@@ -35,6 +40,11 @@ public:
       DepVecAssertionParser::UnaryContext *context) override;
   antlrcpp::Any visitPrimary(
       DepVecAssertionParser::PrimaryContext *context) override;
+  antlrcpp::Any visitLocalValue(
+      DepVecAssertionParser::LocalValueContext *context) override;
+
+private:
+  const ValueTypes &types_;
 };
 
 } // namespace depvec

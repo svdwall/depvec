@@ -79,6 +79,16 @@ struct ExitNode {
 
 using GraphNode = std::variant<InitNode, InstructionNode, BranchNode, ExitNode>;
 
+// The assertion of a phi data hyperedge for the path from one predecessor
+// block, whose incoming value source defines.
+struct IncomingAssertion {
+  std::string predecessor;
+  NodeId source;
+  FormulaPtr assertion;
+};
+
+// A data edge into a phi carries one incoming assertion per predecessor, and
+// its assertion is true. All other edges have no incoming assertions.
 struct DependencyEdge {
   std::string id;
   std::vector<NodeId> sources;
@@ -86,6 +96,7 @@ struct DependencyEdge {
   std::string kind;
   std::vector<std::string> values;
   FormulaPtr assertion;
+  std::vector<IncomingAssertion> incomingAssertions;
   std::vector<NodeId> interferences;
 };
 

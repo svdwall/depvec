@@ -20,7 +20,8 @@ public:
                               std::string_view marker) = 0;
 };
 
-// Encodes DepVec formulas using SMT-LIB integer arithmetic and delegates the
+// Encodes DepVec formulas using SMT-LIB integer arithmetic, with i1 values as
+// Bool constants, and delegates the
 // protocol exchange to an engine. The engine must outlive this object.
 class SmtLibSolver final : public Solver {
 public:

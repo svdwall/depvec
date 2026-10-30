@@ -5,6 +5,7 @@
 #include <iterator>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace {
@@ -16,7 +17,7 @@ std::string formatExpression(const depvec::Expression &expression) {
         if constexpr (std::is_same_v<Node, depvec::IntegerLiteral>) {
           return std::to_string(node.value);
         } else if constexpr (std::is_same_v<Node, depvec::Variable>) {
-          return "%" + node.value.name;
+          return "%" + depvec::valueText(node.value);
         } else if constexpr (std::is_same_v<Node, depvec::Dereference>) {
           return std::visit(
               [](const auto &pointer) {
@@ -45,6 +46,8 @@ std::string formatFormula(const depvec::Formula &formula) {
         using Node = std::decay_t<decltype(node)>;
         if constexpr (std::is_same_v<Node, depvec::BooleanLiteral>) {
           return node.value ? "true" : "false";
+        } else if constexpr (std::is_same_v<Node, depvec::BooleanVariable>) {
+          return "%" + depvec::valueText(node.value);
         } else if constexpr (std::is_same_v<Node, depvec::ComparisonFormula>) {
           return "(" + formatExpression(*node.left) + " " +
                  std::string(depvec::operatorText(node.op)) + " " +
@@ -63,11 +66,10 @@ std::string formatFormula(const depvec::Formula &formula) {
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::cerr << "Usage: depvec-assertion-parse <expression-file>\n";
+  if (argc < 2) {
+    std::cerr << "Usage: depvec-assertion-parse <expression-file> [i1-value...]\n";
     return 2;
   }
-
   std::ifstream file(argv[1]);
   if (!file) {
     std::cerr << "Could not open expression file: " << argv[1] << '\n';
@@ -77,7 +79,15 @@ int main(int argc, char **argv) {
                            std::istreambuf_iterator<char>()};
 
   try {
-    const auto formula = depvec::parseAssertion(source);
+    // The remaining arguments name the i1 values, which are booleans.
+    depvec::ValueTypes types;
+    for (int index = 2; index < argc; ++index) {
+      std::string name = argv[index];
+      if (!name.empty() && name.front() == '%')
+        name.erase(name.begin());
+      types.booleans.insert(std::move(name));
+    }
+    const auto formula = depvec::parseAssertion(source, types);
     std::cout << "Parsed AST: " << formatFormula(*formula) << '\n';
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

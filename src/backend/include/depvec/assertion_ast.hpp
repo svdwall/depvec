@@ -42,8 +42,11 @@ struct Expression {
 };
 
 struct BooleanLiteral { bool value; };
+// An i1 LLVM value. Other integer values are expression Variables.
+struct BooleanVariable { ValueRef value; };
 enum class ComparisonOperator { Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual };
-enum class LogicalOperator { And, Or, Implies };
+// Iff is equality between formulas, written = in assertions.
+enum class LogicalOperator { And, Or, Implies, Iff };
 
 struct ComparisonFormula {
   ComparisonOperator op;
@@ -58,8 +61,8 @@ struct LogicalFormula {
 struct NegationFormula { FormulaPtr operand; };
 
 struct Formula {
-  using Node = std::variant<BooleanLiteral, ComparisonFormula, LogicalFormula,
-                            NegationFormula>;
+  using Node = std::variant<BooleanLiteral, BooleanVariable, ComparisonFormula,
+                            LogicalFormula, NegationFormula>;
   Node node;
 };
 
@@ -92,6 +95,7 @@ constexpr std::string_view operatorText(LogicalOperator op) {
   case LogicalOperator::And: return "&&";
   case LogicalOperator::Or: return "||";
   case LogicalOperator::Implies: return "->";
+  case LogicalOperator::Iff: return "=";
   }
   return "?";
 }
