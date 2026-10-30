@@ -4,7 +4,7 @@ import Depvec.Graph
 # Unrollings
 
 Sections 2 and 3 of `INTERFERENCE.md`: paths, events, occurrences, source
-events, dependency order, and separation.
+events, register order, dependency order, and separation.
 
 A path executes each of its blocks completely. Partial executions are covered,
 because the events of a prefix and the dependencies between them do not change
@@ -50,10 +50,20 @@ def SourceEvent (e : Edge) (o q : Nat) : Prop :=
 def Dep (F : DCG) (π : List BlockId) (q o : Nat) : Prop :=
   ∃ e ∈ F.edges, SourceEvent F.prog π e o q
 
-/-- `≺_π`, the transitive closure of `→_π`. -/
+/-- Register order `q ⇢_π o`: the event at `q` uses or assigns a register
+that the later event at `o` assigns. -/
+def RegDep (q o : Nat) : Prop :=
+  q < o ∧ ∃ u d r, nodeAt P π q = some (.instr u) ∧ nodeAt P π o = some (.instr d) ∧
+    (P.uses u r ∨ P.defs u r) ∧ P.defs d r
+
+/-- One step of `≺_π`: `→_π` or `⇢_π`. -/
+def Step (F : DCG) (π : List BlockId) (q o : Nat) : Prop :=
+  Dep F π q o ∨ RegDep F.prog π q o
+
+/-- `≺_π`, the transitive closure of `→_π ∪ ⇢_π`. -/
 inductive DepLt (F : DCG) (π : List BlockId) : Nat → Nat → Prop
-  | single {a b} : Dep F π a b → DepLt F π a b
-  | tail {a b c} : DepLt F π a b → Dep F π b c → DepLt F π a c
+  | single {a b} : Step F π a b → DepLt F π a b
+  | tail {a b c} : DepLt F π a b → Step F π b c → DepLt F π a c
 
 /-- `⪯_π`. -/
 def DepLe (F : DCG) (π : List BlockId) (a b : Nat) : Prop := a = b ∨ DepLt F π a b

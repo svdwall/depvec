@@ -83,6 +83,8 @@ targets below enter that environment where needed:
 - `make test-backend` builds the backend and runs its tests.
 - `make parse-graph GRAPH=examples/graphs/minimal-graph.json` parses a graph.
 - `make build-pass` builds the LLVM pass.
+- `make test-extractor` runs the extractor's interference tests against a
+  brute-force unrolling oracle.
 - `make compile-examples`, then `make pass IR=build/examples/ir/example.ll` runs
   the pass on an example IR file.
 - `make graphs IR=build/examples/ir/example.ll` exports graph JSON to

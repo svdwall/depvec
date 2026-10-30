@@ -1,11 +1,5 @@
 {
   "format": "depvec-graph-v2",
-  "precondition": "",
-  "postcondition": "",
-  "globalInitialValues": {
-    "@shared_value": "0",
-    "@ready": "0"
-  },
   "functions": [
     {
       "edges": [
@@ -79,7 +73,10 @@
         {
           "assertion": "",
           "id": "e0",
-          "interferences": [],
+          "interferences": [
+            1,
+            4
+          ],
           "kind": "data",
           "sources": [
             2
@@ -92,7 +89,10 @@
         {
           "assertion": "",
           "id": "e1",
-          "interferences": [],
+          "interferences": [
+            1,
+            2
+          ],
           "kind": "data",
           "sources": [
             3
@@ -105,7 +105,9 @@
         {
           "assertion": "",
           "id": "e2",
-          "interferences": [],
+          "interferences": [
+            1
+          ],
           "kind": "data",
           "sources": [
             5
@@ -118,7 +120,11 @@
         {
           "assertion": "%0 = 1 -> @shared_value |-> 42",
           "id": "e3",
-          "interferences": [],
+          "interferences": [
+            1,
+            3,
+            4
+          ],
           "kind": "memory (acquire)",
           "sources": [
             2
@@ -129,7 +135,9 @@
         {
           "assertion": "",
           "id": "e4",
-          "interferences": [],
+          "interferences": [
+            1
+          ],
           "kind": "control",
           "sources": [
             4
@@ -142,7 +150,10 @@
         {
           "assertion": "",
           "id": "e5",
-          "interferences": [],
+          "interferences": [
+            1,
+            5
+          ],
           "kind": "control",
           "sources": [
             4
@@ -248,5 +259,11 @@
       ]
     }
   ],
-  "module": "message_passing.ll"
+  "globalInitialValues": {
+    "@ready": "0",
+    "@shared_value": "0"
+  },
+  "module": "message_passing.ll",
+  "postcondition": "",
+  "precondition": ""
 }

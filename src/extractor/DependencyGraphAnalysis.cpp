@@ -2,6 +2,7 @@
 
 #include "DataDependencyAnalysis.h"
 #include "ControlDependencyAnalysis.h"
+#include "InterferenceAnalysis.h"
 #include "MemoryOrderAnalysis.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Dominators.h"
@@ -65,6 +66,7 @@ DependencyGraphAnalysis::run(llvm::Function &F,
   std::vector<DependencyGraph::DependencyEdge> ControlEdges =
       ControlDependencyAnalysis::run(Graph, DT, PDT);
   Graph.edges.insert(Graph.edges.end(), ControlEdges.begin(), ControlEdges.end());
+  InterferenceAnalysis::run(Graph);
   return Graph;
 }
 

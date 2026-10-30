@@ -4,7 +4,7 @@ import Depvec.Graph
 # Static relations
 
 Section 4 of `INTERFERENCE.md`: the intra-iteration order `≺₀`, selection
-regions, the rules R0–R3 for `⊲`, and the Layer 3 table.
+regions, the rules R0–R4 for `⊲`, and the Layer 3 table.
 -/
 
 namespace Depvec
@@ -43,7 +43,7 @@ def CoverGuarded (t : NodeId) (a s : Node) (p : BlockId) : Prop :=
 
 mutual
 
-/-- `a ⊲ b`, the least relation closed under R0–R2. A premise `A ∨ B` of the
+/-- `a ⊲ b`, the least relation closed under R0–R2 and R4. A premise `A ∨ B` of the
 rules in `INTERFERENCE.md` with `A` static is written as `¬ A → B`. -/
 inductive BeforeNext : Node → Node → Prop
   | r0 {a b} :
@@ -54,6 +54,9 @@ inductive BeforeNext : Node → Node → Prop
       e ∈ F.edges → BeforeEdge a e → BeforeNext a (.instr e.target)
   | r2 {a b c} :
       BeforeNext a b → BeforeNext b c → ¬ F.prog.reach (· = b) a c → BeforeNext a c
+  | r4 {u d r} :
+      (F.prog.uses u r ∨ F.prog.defs u r) → F.prog.defs d r →
+      BeforeNext (.instr u) (.instr d)
 
 /-- `a ⊲ e`, derived by R3. -/
 inductive BeforeEdge : Node → Edge → Prop

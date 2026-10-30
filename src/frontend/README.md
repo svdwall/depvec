@@ -59,6 +59,7 @@ local port.
 - Edit the graph-wide initial and final assertions above the function graphs; each function's init and exit node displays the corresponding assertion.
 - If the graph has no initial assertion, the frontend derives one from the exported `globalInitialValues`. Existing graph preconditions take precedence.
 - Hyperedges appear as colored vertical tracks left of the code, with taps at their source and target instructions.
+- Selecting a dependency highlights the instructions that interfere with it (its `interferences`) in the code, and lists them in the editor heading.
 - Select a dependency to edit its assertion in the editor below the graph (default: empty); drag its HTML frame vertically along the edge track. Focus the frame and use the up/down arrow keys to nudge it.
 - Choose **Save edits** to download a `.depvec-layout.json` file.
 - Use **Open edits** to restore those labels and positions along their edge tracks later.

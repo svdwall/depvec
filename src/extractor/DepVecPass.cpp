@@ -122,7 +122,17 @@ void printDependencyGraph(const Function &F,
       }
       errs() << ")";
     }
-    errs() << "-> n" << Edge.target << '\n';
+    errs() << "-> n" << Edge.target;
+    if (!Edge.interferences.empty()) {
+      errs() << " interf {";
+      bool FirstInterference = true;
+      for (unsigned Interference : Edge.interferences) {
+        errs() << (FirstInterference ? "n" : ", n") << Interference;
+        FirstInterference = false;
+      }
+      errs() << '}';
+    }
+    errs() << '\n';
   }
 }
 

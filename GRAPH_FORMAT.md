@@ -83,7 +83,7 @@ define all of its incoming values.
 | `kind` | string | Dependency category, such as data or memory dependency. |
 | `values` | string array | SSA values associated with the dependency, or branch-arm markers on control edges. |
 | `assertion` | string | Assertion label for the edge. Currently emitted as an empty string. |
-| `interferences` | integer array | IDs of nodes in the same function that interfere with the edge. Currently emitted as an empty array. |
+| `interferences` | integer array | IDs of instruction nodes in the same function that interfere with the edge, as defined in `INTERFERENCE.md`. Never contains the init or exit node. |
 
 If `precondition` is empty, the frontend builds it from `globalInitialValues`.
 An existing non-empty precondition takes precedence. Initial values are emitted

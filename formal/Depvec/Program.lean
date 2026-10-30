@@ -9,6 +9,7 @@ namespace Depvec
 
 abbrev BlockId := Nat
 abbrev NodeId := Nat
+abbrev Reg := Nat
 
 /-- A graph node: the virtual `init` marker or an instruction. Exit markers are
 instructions that no edge mentions. -/
@@ -18,12 +19,15 @@ inductive Node where
   deriving DecidableEq
 
 /-- A function's control flow. `code b` lists the instruction nodes of block
-`b`, ending in its terminator. -/
+`b`, ending in its terminator. `uses n r` and `defs n r` say that instruction
+`n` reads or assigns register `r`. -/
 structure Program where
   entry : BlockId
   blocks : List BlockId
   code : BlockId → List NodeId
   succ : BlockId → List BlockId
+  uses : NodeId → Reg → Prop
+  defs : NodeId → Reg → Prop
 
 namespace Program
 

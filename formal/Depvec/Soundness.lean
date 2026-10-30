@@ -153,11 +153,17 @@ theorem dep_lt {π : List BlockId} {a b : Nat} (h : Dep F π a b) : a < b := by
     obtain ⟨_, e₀, p, ⟨_, _, _, he1, _⟩, hq, _⟩ := hs
     omega
 
+/-- Every step of `≺_π` goes forward. -/
+theorem step_lt {π : List BlockId} {a b : Nat} (h : Step F π a b) : a < b := by
+  rcases h with h | h
+  · exact dep_lt F h
+  · exact h.1
+
 /-- Lemma 0: `≺_π ⊆ <_π`. -/
 theorem depLt_lt {π : List BlockId} {a b : Nat} (h : DepLt F π a b) : a < b := by
   induction h with
-  | single h => exact dep_lt F h
-  | tail _ h ih => exact Nat.lt_trans ih (dep_lt F h)
+  | single h => exact step_lt F h
+  | tail _ h ih => exact Nat.lt_trans ih (step_lt F h)
 
 theorem DepLt.trans {π : List BlockId} {a b c : Nat} (h₁ : DepLt F π a b)
     (h₂ : DepLt F π b c) : DepLt F π a c := by
@@ -205,7 +211,7 @@ theorem prec0_latest {a b : Node} {π : List BlockId} {ν : Nat}
     obtain ⟨α, hα, hαs⟩ := hr.dom (hF.edges _ he).2.2 (by simp) hν
     obtain ⟨q, hq, hqs, hql⟩ :=
       exists_latest (Q := fun q => nodeAt F.prog π q = some s) ⟨α, hα, hαs⟩
-    exact ⟨q, hq, hqs, hql, .single ⟨_, he, hν, hq, hqs, hql⟩⟩
+    exact ⟨q, hq, hqs, hql, .single (.inl ⟨_, he, hν, hq, hqs, hql⟩)⟩
   | @trans a b c hab hbc ih₁ ih₂ =>
     obtain ⟨β, hβ, hβb, hβl, hdep₂⟩ := ih₂ hν
     obtain ⟨α, hα, hαa, hαl, hdep₁⟩ := ih₁ hβb
@@ -340,7 +346,7 @@ theorem sem_r1 {a : Node} {e : Edge} (hF : F.WellFormed) (he : e ∈ F.edges)
     (h : SemBeforeEdge F a e) : SemBeforeNext F a (.instr e.target) := by
   intro π hπ α β hα ⟨hαβ, hβ, hβl⟩
   obtain ⟨q, hq⟩ := sourceEvent_exists F hF he hπ hβ
-  exact DepLe.trans_lt F (h π hπ α β q hα ⟨hαβ, hβ, hβl⟩ hq) (.single ⟨e, he, hq⟩)
+  exact DepLe.trans_lt F (h π hπ α β q hα ⟨hαβ, hβ, hβl⟩ hq) (.single (.inl ⟨e, he, hq⟩))
 
 theorem sem_r2 {a b c : Node} (hF : F.WellFormed) (hab : SemBeforeNext F a b)
     (hbc : SemBeforeNext F b c) (hn : ¬ F.prog.reach (· = b) a c) : SemBeforeNext F a c := by
@@ -440,6 +446,11 @@ theorem sem_r3_guarded {a : Node} {J : BlockId} {sel : BlockId → Node} {t : No
         fun δ h3 h4 => hol δ (by omega) (by omega)))
     · exact absurd hγ (hol γ h1 (by omega))
 
+theorem sem_r4 {u d : NodeId} {r : Reg} (hu : F.prog.uses u r ∨ F.prog.defs u r)
+    (hd : F.prog.defs d r) : SemBeforeNext F (.instr u) (.instr d) := by
+  intro π _ α β hα ⟨hαβ, hβ, _⟩
+  exact .single (.inr ⟨hαβ, u, d, r, hα, hβ, hu, hd⟩)
+
 mutual
 
 /-- Lemma 2: every derived `⊲` fact holds semantically. -/
@@ -448,6 +459,7 @@ theorem beforeNext_sound (hF : F.WellFormed) :
   | _, _, .r0 hab hrec => sem_r0 F hF hab fun h => beforeNext_sound hF (hrec h)
   | _, _, .r1 he h => sem_r1 F hF he (beforeEdge_sound hF h)
   | _, _, .r2 h₁ h₂ hn => sem_r2 F hF (beforeNext_sound hF h₁) (beforeNext_sound hF h₂) hn
+  | _, _, .r4 hu hd => sem_r4 F hu hd
 
 /-- Lemma 2 for `⊲` toward an edge. -/
 theorem beforeEdge_sound (hF : F.WellFormed) :
@@ -504,7 +516,7 @@ theorem soundness {e : Edge} {i : NodeId} {π : List BlockId} {o ι : Nat}
           · exact h
         obtain ⟨qp, hqp⟩ := sourceEvent_exists F hF he hπ hop
         have hιop : DepLt F π ι op :=
-          DepLe.trans_lt F (ih op (by omega) hop hop₁ qp hqp).1 (.single ⟨e, he, hqp⟩)
+          DepLe.trans_lt F (ih op (by omega) hop hop₁ qp hqp).1 (.single (.inl ⟨e, he, hqp⟩))
         have hstrict : DepLt F π ι q' := by
           by_cases hi : ∃ γ, op < γ ∧ γ < o' ∧ nodeAt F.prog π γ = some (.instr i)
           · obtain ⟨γ, hγ1, hγ2, hγ⟩ := hi
@@ -558,7 +570,7 @@ theorem soundness {e : Edge} {i : NodeId} {π : List BlockId} {o ι : Nat}
             have semA := beforeEdge_sound F hF
               (ha (hr.reach ho'1 hιp.2 ho' fun _ _ _ _ _ h => h))
             have hd₁ := DepLe.trans_lt F (semA π hπ ιp o' q' hιp.2 ⟨ho'1, ho', ho'l⟩ hq')
-              (.single ⟨e, he, hq'⟩)
+              (.single (.inl ⟨e, he, hq'⟩))
             have semB := beforeNext_sound F hF (hb hreach_ti)
             have hd₂ := semB π hπ o' ι' ho'
               ⟨by omega, hι', fun δ h4 h5 hδ => hιpl δ (by omega) h5 ⟨by omega, hδ⟩⟩

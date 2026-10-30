@@ -1,8 +1,8 @@
 # Interference for Dependency Edges: Formal Model
 
 This document defines the interference sets attached to dependency edges in
-`depvec-graph-v2` and states the soundness property they should satisfy. It is
-a design document; the extractor does not compute interferences yet.
+`depvec-graph-v2` and states the soundness property they should satisfy. The
+extractor computes them as described in Section 5.
 
 The model, Lemmas 0–2, and the soundness theorem are formalized and proven in
 Lean 4 in `formal/`. Run `make build-formal` to check the proofs.
@@ -14,7 +14,9 @@ one target `t_e`, and a kind `κ` (data, memory, or control). For each edge, we
 want a static set `Interf(e)` of instruction nodes in the same function.
 
 **Guarantee:** if, in some unrolling, an event of an instruction `i` is ordered
-neither before nor after an occurrence of `e`, then `i ∈ Interf(e)`. The
+neither before nor after an occurrence of `e`, then `i ∈ Interf(e)`. The order
+is dependency order plus register order: an instruction that uses or assigns a
+register comes before every later assignment of that register. The
 occurrence itself and its own source event are not compared with it; other
 events of the target and of the sources are.
 
@@ -30,6 +32,11 @@ A function is `c = (B, b₀, code, G)`:
   `pred(b)` the set of blocks that can jump to `b`.
 - `G = (N, E)` is the dependency graph. `N` contains the instruction nodes and
   the `init` and exit markers.
+- `uses(n)` and `defs(n)` are the registers that instruction `n` reads and
+  assigns. A `phi` uses its incoming values. No condition links them to
+  dominance or to `E`, and they need not be in SSA form. In SSA form,
+  `defs(d) = {%d}`, so a later assignment of `%d` is a later event of `d`.
+  `init` and function arguments assign nothing.
 
 **Dominance** is at instruction level. `a` strictly dominates `b` when `a ≠ b`
 and either `a` comes earlier in the same block or `a`'s block strictly
@@ -115,9 +122,14 @@ itself.
     their operands in parallel, so a phi that is evaluated earlier in the same
     block does not count as the source. For example, `a = phi(…, b)` and
     `b = phi(…, a)` swap values.
-- **Unrolled dependency:** `σ(o) →_π o` for every edge and occurrence. `≺_π`
-  is the transitive closure of `→_π`, so it is dependency order, not position
-  order. `⪯_π` is its reflexive closure.
+- **Unrolled dependency:** `σ(o) →_π o` for every edge and occurrence.
+- **Register order:** `q ⇢_π o` when `q <_π o`, and `ν(q)` uses or assigns a
+  register that `ν(o)` assigns. This is not an edge of `G`. It is defined on
+  the trace alone, and it has no occurrences or source events. Taking only the
+  next assignment would give the same closure below, through the steps from
+  one assignment to the next.
+- `≺_π` is the transitive closure of `→_π ∪ ⇢_π`, so it is dependency and
+  register order, not position order. `⪯_π` is its reflexive closure.
 
 ## 3. Separation and the Theorem
 
@@ -140,6 +152,10 @@ of a source can still be unordered with this iteration's occurrence.
 **Lemma 0.** `≺_π ⊆ <_π`. So an event `ι` strictly between `σ(o)` and `o` is
 never separated: whatever runs on a path between the source and the target
 trivially interferes.
+
+Adding steps to `≺_π` only separates more pairs. Register order therefore
+needs no change to R0–R3 or the Layer 3 table; it improves precision through
+the rule R4 below.
 
 ## 4. Static Relations
 
@@ -210,6 +226,8 @@ The relation is reflexive only when `a` is a source of `e`. If `a ∉ S_e`,
   before `t`."
 - **(R2)** If `a ⊲ b`, `b ⊲ c`, and `¬reach^{∖b}(a, c)`, then `a ⊲ c`. This is
   transitivity: `c` must not occur between `a` and the next `b`.
+- **(R4)** If `uses(u) ∪ defs(u)` and `defs(d)` share a register, then
+  `u ⊲ d`. In particular, `d ⊲ d` for every `d` that assigns a register.
 - **(R3)** `a ⊲ e`, with `t = t_e`, when the conditions below hold for every
   source that can be active at the next occurrence.
   - **Plain `e`, with `s = s_e`:**
@@ -233,6 +251,9 @@ So the least relation exists and is a least fixpoint.
 
 **Lemma 2.** Every derived `⊲` fact holds semantically, by induction on
 derivations.
+
+For R4, take a `u`-event `α` and the next `d`-event `β`. Then `α <_π β`, so
+`α ⇢_π β`.
 
 For R3, take an `a`-event `α` and the next occurrence `o`, with `s = act(o)`.
 No `t`-event lies strictly between `α` and `o`. Let `end` be the end of the
@@ -260,6 +281,16 @@ guarded, with `J = block(h)`. `sel(preheader) = p` and `sel(latch) = c`.
   - It fails for `r = load(data)`, which is correct: `x` is not ordered before
     the use.
   - It holds for `r = r + load`.
+
+**Loops without a header `phi`.** In the `message_passing` reader,
+`%0 = load @ready` (n2), `%cmp = icmp %0` (n3) and `br %cmp` (n4) form the
+loop, and `%1 = load @shared_value` (n5) and `ret %1` (n6) follow it. R4 gives
+`n2 ⊲ n2`, `n3 ⊲ n2`, `n3 ⊲ n3` and `n4 ⊲ n3`. R2 then gives `n4 ⊲ n4`,
+because every path from n4 back to n4 passes n3. With these, R0 meets its
+`a ⊲ a` premise for the plain edges `n2 → n5` and `n4 → n5`. So n2, n3 and n4
+are separated from the data edge `n5 → n6`, and only the entry `br` interferes
+with it. Some order is still missing: one iteration's `br` is unordered with
+the next iteration's load, because no register links them.
 
 **Acquire loads in both branches.** Take `e = (J, {p₁ ↦ acq₁, p₂ ↦ acq₂}, t)`
 for a memory access `t` after the join block `J`. Then `region(e)` contains
@@ -310,23 +341,37 @@ The case where `o` comes before `ι` is symmetric, using (b) and (d).
 
 ## 5. Algorithm
 
+The algorithm lives in `src/extractor/InterferenceModel.cpp`, which uses only
+the standard library and mirrors `formal/Depvec/Static.lean`.
+`src/extractor/InterferenceAnalysis.cpp` translates an LLVM function into it:
+blocks reachable from the entry, a guarded edge for each `phi` data edge, a
+plain edge for every other edge, and one register per non-void instruction.
+`uses(n)` holds the instruction operands of `n`. An edge outside the model of Section 1 is a
+fatal error.
+
 1. **Instruction CFG**, as in Section 1, with entries into blocks marked.
 2. **Reachability oracle** for `reach^{∖X}(a, b)` with `|X| ≤ 2`, and for
-   `reach_{↛J}(a, b)`. Use a search that never expands nodes in `X`, or never
-   takes an entry into `J`, memoized per `X` or `J`.
+   `reach_{↛J}(a, b)`. A search that never expands nodes in `X`, or never
+   takes an entry into `J`, answers all `b` at once and is memoized per `a`
+   and `X` or `J`. Strict dominance and (G1)–(G3) are checked with the same
+   searches.
 3. **Static facts:** `≺₀`, the closure of plain edges over a DAG; upcoming
    sources; `region(e)` for every guarded edge; and coverage for every
    `(a, e)`.
-4. **Fixpoint** of R0–R3 over `a ⊲ b` and `a ⊲ e`, with a semi-naive
-   worklist. There are at most `|N|² + |N|·|E|` facts.
+4. **Fixpoint** of R0–R3 over `a ⊲ b` and `a ⊲ e`, starting from the R4
+   facts, which have no premises. Passes over all
+   underived facts repeat until one derives nothing. There are at most
+   `|N|² + |N|·|E|` facts. A semi-naive worklist would avoid re-evaluating
+   facts whose premises have not changed.
 5. **`Interf(e)`** from the Layer 3 table, for every instruction node.
 
-**Validation.** A brute-force oracle enumerates all path prefixes up to a bound
-on loop iterations. It builds `≺_π` and computes the unseparated pairs exactly
-as Section 3 defines them. The computed `Interf(e)` must contain every such
-`i`. The difference measures precision. Inputs are the example programs,
-targeted cases, and randomly generated small CFGs with well-formed edges.
-Targeted cases include:
+**Validation.** `test/extractor/UnrollingOracle.cpp` enumerates all paths that
+visit each block at most a bounded number of times. It builds `≺_π` and
+computes the unseparated pairs exactly as Section 3 defines them, including
+register order. The computed
+`Interf(e)` must contain every such `i`; the difference measures precision.
+`make test-extractor` runs it on targeted cases and on randomly generated small
+CFGs with well-formed edges. Targeted cases include:
 
 - nested loops and swapped phis;
 - phis with an argument as an incoming value, and a value that reaches a `phi`
@@ -342,6 +387,8 @@ Targeted cases include:
   occurrence has exactly one active source.
 - The extractor emits only plain edges, except for one guarded data edge per
   `phi`. Data edges into other targets are split per SSA value.
+- Register order is part of `≺_π`. It is trace order, not edges of `G`, and
+  enters the static rules only through R4.
 - Candidates are the instruction nodes of `e`'s own function, including `e`'s
   sources and target. Init and exit markers are excluded.
 - An occurrence is compared with every event except the occurrence itself and
@@ -353,6 +400,8 @@ Targeted cases include:
   source up to the last entry into the selection block.
 - Constant operands have no source. `phi` instructions with constant incoming
   values are not supported for now, so every occurrence has an active source.
+- The extractor rejects a function with an edge outside the model, such as a
+  `phi` with a constant incoming value, with a fatal error.
 - Dominance is strict and at instruction level.
 - `Interf(e)` is a pure ordering notion. A consumer narrows it to instructions
   that write memory the edge's assertion reads.
@@ -365,12 +414,13 @@ Targeted cases include:
 - **Format for guarded edges:** for a `phi`, `J_e` and `sel_e` follow from
   `operation.incoming`. Guarded memory or control edges need the selection
   block and the map from predecessor to source in the edge object.
-- **Precision on loops without a header `phi`:** for example, the
-  `message_passing` reader. No next-iteration ordering can be derived there, so
-  all of the loop's instructions interfere with its edges. A loop-carried
-  control edge could fix this. It would be guarded, with `J_e` the loop header
-  and `sel_e(latch)` the latch branch. (G2) also requires a source for the
-  preheader, and it is open which node that should be.
+- **Precision on loops without a header `phi`:** register order orders each
+  value's uses before its next assignment (Section 4). Instructions that no
+  register links are still unordered across iterations, such as the
+  `message_passing` reader's latch `br` and the next iteration's load. A
+  loop-carried control edge could fix this. It would be guarded, with `J_e` the
+  loop header and `sel_e(latch)` the latch branch. (G2) also requires a source
+  for the preheader, and it is open which node that should be.
 - **Other threads:** instructions from other analyzed functions would always
   interfere. Including them requires function-qualified node references in the
   format. Alternatively, the consumer can add them, without a format change.

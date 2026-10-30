@@ -1,4 +1,4 @@
-.PHONY: compile-ir compile-examples build-pass build-backend test-backend build-formal parse-graph nix-build pass graphs example-graphs lint lint-examples lint-all clean clean-extractor clean-backend clean-examples
+.PHONY: compile-ir compile-examples build-pass build-backend test-backend build-formal test-extractor parse-graph nix-build pass graphs example-graphs lint lint-examples lint-all clean clean-extractor clean-backend clean-examples
 
 EXAMPLE_PROGRAMS_DIR := examples/programs
 EXAMPLE_BUILD_DIR := build/examples
@@ -11,6 +11,7 @@ SOURCE_CPP_FILES := $(wildcard src/extractor/*.cpp)
 EXTRACTOR_BUILD_DIR := build/extractor
 EXTRACTOR_PACKAGE := $(EXTRACTOR_BUILD_DIR)/nix
 EXTRACTOR_PLUGIN = $(firstword $(wildcard $(EXTRACTOR_BUILD_DIR)/DepVecPass.*))
+EXTRACTOR_TEST_BUILD_DIR := build/extractor-tests
 BACKEND_BUILD_DIR := build/backend
 LLVM_OPT ?= opt
 
@@ -43,6 +44,12 @@ build-backend:
 	nix develop --command sh -c 'cmake -S src/backend -B $(BACKEND_BUILD_DIR) -DCMAKE_CXX_COMPILER="$$DEPVEC_CXX_COMPILER" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'
 	nix develop --command cmake --build $(BACKEND_BUILD_DIR) -j4
 
+# Build and run the extractor unit tests, which need no LLVM at run time.
+test-extractor:
+	nix develop --command sh -c 'cmake -S . -B $(EXTRACTOR_TEST_BUILD_DIR) -G Ninja -DCMAKE_CXX_COMPILER="$$DEPVEC_CXX_COMPILER" -DDEPVEC_BUILD_EXTRACTOR_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'
+	nix develop --command cmake --build $(EXTRACTOR_TEST_BUILD_DIR) --target DepVecExtractorTests
+	nix develop --command ctest --test-dir $(EXTRACTOR_TEST_BUILD_DIR) --output-on-failure
+
 # Type-check the Lean formalization of interference in formal/.
 build-formal:
 	cd formal && nix develop .. --command lake build
@@ -71,7 +78,7 @@ pass: build-pass
 # Export the graphs for annotated functions as JSON for the standalone viewer.
 # Writes build/examples/graphs/<name>.depvec-graph.json unless OUT is set.
 # Usage: make graphs IR=build/examples/ir/branch_phi.ll [OUT=path/to/graph.json]
-graphs: build-pass
+graphs: build-pass $(IR)
 	@test -n "$(IR)" || (echo "Set IR=path/to/file.ll" >&2; exit 1)
 	mkdir -p "$(dir $(GRAPH_OUT))"
 	$(DEPVEC_OPT) -depvec-output="$(GRAPH_OUT)" "$(IR)"
@@ -101,7 +108,7 @@ lint-all: lint lint-examples
 
 # Remove the extractor build directory, including its Nix result link.
 clean-extractor:
-	rm -rf $(EXTRACTOR_BUILD_DIR)
+	rm -rf $(EXTRACTOR_BUILD_DIR) $(EXTRACTOR_TEST_BUILD_DIR)
 
 # Remove the backend build directory.
 clean-backend:

@@ -605,6 +605,7 @@ function renderFunctionCard(model) {
     model.showAllEdges = !model.showAllEdges;
     if (!model.showAllEdges && model.selected?.type === 'edge' && !edgeHasAssertion(model, model.selected.id)) {
       model.selected = null;
+      updateLineHighlights(model);
       updateInspector(model);
     }
     updateEdgeVisibilityControl(model);
@@ -726,7 +727,9 @@ function updateInspector(model) {
   } else {
     const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
     heading.textContent = `${edge?.kind ?? 'dependency'} hyperedge`;
-    detail.textContent = `${(edge?.sources || []).map((source) => `n${source}`).join(' + ')} → n${edge?.target ?? '?'}`;
+    const interferences = edge?.interferences || [];
+    detail.textContent = `${(edge?.sources || []).map((source) => `n${source}`).join(' + ')} → n${edge?.target ?? '?'}` +
+      ` · ${interferences.length ? `interferes with ${interferences.map((node) => `n${node}`).join(', ')}` : 'no interferences'}`;
   }
   copy.append(heading, detail);
   summary.append(icon, copy);
@@ -1180,13 +1183,26 @@ function selectUnannotatedEdge(model, edge) {
 
 function selectEntity(model, type, id) {
   model.selected = { type, id };
-  model.lineNodes.forEach((line) => line.classList.remove('selected'));
-  if (type === 'node') {
-    const line = model.nodeLines.get(Number(id));
-    model.lineNodes.get(line)?.classList.add('selected');
-  }
+  updateLineHighlights(model);
   updateInspector(model);
   setupOverlay(model);
+}
+
+// Marks the selected instruction, or the instructions that interfere with the
+// selected dependency.
+function updateLineHighlights(model) {
+  const selected = model.selected;
+  model.lineNodes.forEach((line) => line.classList.remove('selected', 'interferes'));
+  if (selected?.type === 'node') {
+    const line = model.nodeLines.get(Number(selected.id));
+    model.lineNodes.get(line)?.classList.add('selected');
+  } else if (selected?.type === 'edge') {
+    const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
+    for (const nodeId of edge?.interferences || []) {
+      const line = model.nodeLines.get(Number(nodeId));
+      model.lineNodes.get(line)?.classList.add('interferes');
+    }
+  }
 }
 
 function isSelected(model, type, id) {
