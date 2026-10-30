@@ -240,6 +240,11 @@ window.addEventListener('keydown', (event) => {
   setTemporaryAllEdges(true);
 });
 
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || event.target.matches('input, textarea, [contenteditable="true"]')) return;
+  state.models.filter(initModeArmed).forEach(clearSelection);
+});
+
 window.addEventListener('keyup', (event) => {
   if (event.key === 'Alt') setTemporaryAllEdges(false);
 });
@@ -367,6 +372,7 @@ function createFunctionModel(fn, index) {
     lineNodes: new Map(),
     showAllEdges: false,
     altShowAllEdges: false,
+    initPreview: null,
     edgeVisibilityButton: null,
   };
 }
@@ -590,10 +596,12 @@ function renderFunctionCard(model) {
 
   const stats = document.createElement('div');
   stats.className = 'function-stats';
+  const initEdgeCount = fn.edges.filter(isInitEdge).length;
   stats.append(
     stat(`${fn.nodes.length}`, 'nodes'),
-    stat(`${fn.edges.length}`, 'hyperedges'),
+    stat(`${fn.edges.length - initEdgeCount}`, 'hyperedges'),
   );
+  if (initEdgeCount) stats.append(stat(`${initEdgeCount}`, 'init edges'));
   const headerActions = document.createElement('div');
   headerActions.className = 'function-header-actions';
   const edgeVisibilityButton = document.createElement('button');
@@ -603,7 +611,8 @@ function renderFunctionCard(model) {
   edgeVisibilityButton.addEventListener('click', () => {
     model.altShowAllEdges = false;
     model.showAllEdges = !model.showAllEdges;
-    if (!model.showAllEdges && model.selected?.type === 'edge' && !edgeHasAssertion(model, model.selected.id)) {
+    if (!model.showAllEdges && model.selected?.type === 'edge' && !edgeHasAssertion(model, model.selected.id) &&
+        !initModeArmed(model)) {
       model.selected = null;
       updateLineHighlights(model);
       updateInspector(model);
@@ -661,13 +670,15 @@ function renderFunctionCard(model) {
     lineNode.tabIndex = 0;
     const layout = getFunctionLayout(fn.name);
     if (nodes.some((node) => layout.nodes[String(node.id)]?.label)) lineNode.classList.add('node-labeled');
-    lineNode.addEventListener('click', () => selectEntity(model, 'node', Number(nodes[0].id)));
+    lineNode.addEventListener('click', () => selectLine(model, nodes[0]));
     lineNode.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        selectEntity(model, 'node', Number(nodes[0].id));
+        selectLine(model, nodes[0]);
       }
     });
+    lineNode.addEventListener('mouseenter', () => previewInitEdge(model, nodes[0]));
+    lineNode.addEventListener('mouseleave', () => setInitPreview(model, null));
   });
 
   const inspector = createInspector(model);
@@ -723,7 +734,9 @@ function updateInspector(model) {
   } else if (selected.type === 'node') {
     const node = model.function.nodes.find((entry) => Number(entry.id) === Number(selected.id));
     heading.textContent = `${node?.kind ?? 'instruction'} node n${selected.id}`;
-    detail.textContent = node?.instruction || 'Function boundary';
+    detail.textContent = node?.kind === 'init'
+      ? 'Click an instruction to select its init edge · Esc to leave'
+      : node?.instruction || 'Function boundary';
   } else {
     const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
     heading.textContent = `${edge?.kind ?? 'dependency'} hyperedge`;
@@ -810,15 +823,27 @@ function edgeHasAssertion(model, edgeId) {
   return String(savedLabel ?? edge.assertion ?? '').trim().length > 0;
 }
 
+function isInitEdge(edge) {
+  return edge?.kind === 'init';
+}
+
+// Init edges reach every instruction, so showing all dependencies leaves them
+// out. They appear when annotated, selected, or previewed in init mode.
 function edgeIsVisible(model, edge) {
-  return (model.selected?.type === 'edge' && String(model.selected.id) === String(edge.id)) ||
-    model.showAllEdges || model.altShowAllEdges || edgeHasAssertion(model, edge.id);
+  if (isSelected(model, 'edge', edge.id) || isInitPreview(model, edge) || edgeHasAssertion(model, edge.id))
+    return true;
+  return !isInitEdge(edge) && (model.showAllEdges || model.altShowAllEdges);
+}
+
+function isInitPreview(model, edge) {
+  return model.initPreview !== null && String(model.initPreview) === String(edge.id);
 }
 
 function updateEdgeVisibilityControl(model) {
   const button = model.edgeVisibilityButton;
   if (!button) return;
-  const hiddenCount = model.function.edges.filter((edge) => !edgeHasAssertion(model, edge.id)).length;
+  const hiddenCount = model.function.edges
+    .filter((edge) => !isInitEdge(edge) && !edgeHasAssertion(model, edge.id)).length;
   button.hidden = hiddenCount === 0;
   button.textContent = model.showAllEdges
     ? 'Hide unannotated dependencies'
@@ -833,7 +858,8 @@ function updateInstructionSpacing(model) {
     endpointCounts.set(id, (endpointCounts.get(id) || 0) + 1);
   };
   for (const edge of model.function.edges) {
-    if (!edgeIsVisible(model, edge)) continue;
+    // A hover preview must not move the line under the pointer.
+    if (!edgeIsVisible(model, edge) || isInitPreview(model, edge)) continue;
     edge.sources.forEach(addEndpoint);
     addEndpoint(edge.target);
   }
@@ -889,12 +915,17 @@ function setupOverlay(model) {
 
   // Reserve enough horizontal room for the full graph so hiding edges never
   // moves the code, but pack visible edges independently below.
+  // Unannotated init edges share one extra lane, since init mode shows at most
+  // one of them.
   const reservedLaneEnds = [];
-  for (const track of candidates) {
+  const reserved = candidates.filter((track) =>
+    !isInitEdge(track.edge) || edgeHasAssertion(model, track.edge.id));
+  for (const track of reserved) {
     let lane = reservedLaneEnds.findIndex((endY) => endY < track.startY);
     if (lane < 0) lane = reservedLaneEnds.length;
     reservedLaneEnds[lane] = track.endY;
   }
+  if (reserved.length < candidates.length) reservedLaneEnds.push(Infinity);
   const visibleCandidates = candidates.filter((track) => edgeIsVisible(model, track.edge));
 
   const endpointsByNode = new Map();
@@ -1188,16 +1219,66 @@ function selectEntity(model, type, id) {
   setupOverlay(model);
 }
 
+function clearSelection(model) {
+  model.selected = null;
+  model.initPreview = null;
+  updateLineHighlights(model);
+  updateInspector(model);
+  setupOverlay(model);
+}
+
+// Init mode is armed while the init node or an init edge is selected. Clicking
+// an instruction then selects its init edge, and clicking init leaves.
+function initModeArmed(model) {
+  const selected = model.selected;
+  if (selected?.type === 'node')
+    return model.function.nodes.find((node) => Number(node.id) === Number(selected.id))?.kind === 'init';
+  return selected?.type === 'edge' &&
+    isInitEdge(model.function.edges.find((edge) => String(edge.id) === String(selected.id)));
+}
+
+function initEdgeFor(model, node) {
+  if (!initModeArmed(model) || node.kind === 'init') return null;
+  return model.function.edges.find((edge) => isInitEdge(edge) && Number(edge.target) === Number(node.id));
+}
+
+function selectLine(model, node) {
+  if (initModeArmed(model) && node.kind === 'init') {
+    clearSelection(model);
+    return;
+  }
+  const edge = initEdgeFor(model, node);
+  model.initPreview = null;
+  if (edge) selectEntity(model, 'edge', edge.id);
+  else selectEntity(model, 'node', Number(node.id));
+}
+
+function previewInitEdge(model, node) {
+  const edge = initEdgeFor(model, node);
+  setInitPreview(model, edge && !isSelected(model, 'edge', edge.id) ? edge.id : null);
+}
+
+function setInitPreview(model, edgeId) {
+  if (model.initPreview === edgeId) return;
+  model.initPreview = edgeId;
+  updateLineHighlights(model);
+  setupOverlay(model);
+}
+
 // Marks the selected instruction, or the instructions that interfere with the
-// selected dependency.
+// selected or previewed dependency. An init edge also marks its target.
 function updateLineHighlights(model) {
   const selected = model.selected;
+  model.card?.classList.toggle('init-armed', initModeArmed(model));
   model.lineNodes.forEach((line) => line.classList.remove('selected', 'interferes'));
-  if (selected?.type === 'node') {
+  const edgeId = model.initPreview ?? (selected?.type === 'edge' ? selected.id : null);
+  if (selected?.type === 'node' && edgeId === null) {
     const line = model.nodeLines.get(Number(selected.id));
     model.lineNodes.get(line)?.classList.add('selected');
-  } else if (selected?.type === 'edge') {
-    const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
+  } else if (edgeId !== null) {
+    const edge = model.function.edges.find((entry) => String(entry.id) === String(edgeId));
+    if (isInitEdge(edge))
+      model.lineNodes.get(model.nodeLines.get(Number(edge.target)))?.classList.add('selected');
     for (const nodeId of edge?.interferences || []) {
       const line = model.nodeLines.get(Number(nodeId));
       model.lineNodes.get(line)?.classList.add('interferes');

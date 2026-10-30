@@ -66,6 +66,10 @@ DependencyGraphAnalysis::run(llvm::Function &F,
   std::vector<DependencyGraph::DependencyEdge> ControlEdges =
       ControlDependencyAnalysis::run(Graph, DT, PDT);
   Graph.edges.insert(Graph.edges.end(), ControlEdges.begin(), ControlEdges.end());
+  // Init dominates every instruction, so each one gets an init edge.
+  for (unsigned Id = 0; Id < Graph.nodes.size(); ++Id)
+    if (Id != Graph.initNodeId)
+      Graph.edges.push_back({{Graph.initNodeId}, Id, "init", {}, {}});
   InterferenceAnalysis::run(Graph);
   return Graph;
 }

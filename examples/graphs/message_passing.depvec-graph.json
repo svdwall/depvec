@@ -13,6 +13,44 @@
           ],
           "target": 2,
           "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e1",
+          "interferences": [],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 1,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e2",
+          "interferences": [
+            1
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 2,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e3",
+          "interferences": [
+            1,
+            2
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 3,
+          "values": []
         }
       ],
       "ir": "; Function Attrs: mustprogress nofree norecurse nounwind sspstrong willreturn memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine void @message_passing_writer() #0 {\nentry:\n  store atomic i32 42, ptr @shared_value monotonic, align 4\n  store atomic i32 1, ptr @ready release, align 4\n  ret void\n}",
@@ -162,6 +200,103 @@
           "values": [
             "false-branch"
           ]
+        },
+        {
+          "assertion": "",
+          "id": "e6",
+          "interferences": [
+            2,
+            3,
+            4,
+            5
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 1,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e7",
+          "interferences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 2,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e8",
+          "interferences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 3,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e9",
+          "interferences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 4,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e10",
+          "interferences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 5,
+          "values": []
+        },
+        {
+          "assertion": "",
+          "id": "e11",
+          "interferences": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "kind": "init",
+          "sources": [
+            0
+          ],
+          "target": 6,
+          "values": []
         }
       ],
       "ir": "; Function Attrs: nofree norecurse nounwind sspstrong memory(readwrite, argmem: none, inaccessiblemem: none, target_mem0: none, target_mem1: none) uwtable(sync)\ndefine i32 @message_passing_reader() #1 {\nentry:\n  br label %while.cond\n\nwhile.cond:                                       ; preds = %while.cond, %entry\n  %0 = load atomic i32, ptr @ready acquire, align 4\n  %cmp = icmp eq i32 %0, 0\n  br i1 %cmp, label %while.cond, label %while.end, !llvm.loop !10\n\nwhile.end:                                        ; preds = %while.cond\n  %1 = load atomic i32, ptr @shared_value monotonic, align 4\n  ret i32 %1\n}",
