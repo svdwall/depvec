@@ -17,6 +17,10 @@ SolverSymbols verificationSymbols(const FunctionDFG &function);
 // assertion && node precondition && !weakest_precondition.
 void checkVerificationConditions(FunctionDFG &function, Solver &solver);
 
+// Whether every instruction and branch node is proved. Init and exit nodes
+// have no verification condition.
+bool allNodesProved(const FunctionDFG &function);
+
 const char *verificationStatusText(VerificationStatus status);
 
 } // namespace depvec

@@ -123,8 +123,8 @@ void checkNode(Node &node, Solver &solver) {
       *node.precondition && !*node.weakest_precondition, solver);
 }
 
-// Instruction and branch nodes must be proved; init and exit nodes have no
-// verification condition.
+} // namespace
+
 bool allNodesProved(const FunctionDFG &function) {
   for (const GraphNode &graphNode : function.nodes) {
     const bool proved = std::visit([](const auto &node) {
@@ -140,6 +140,8 @@ bool allNodesProved(const FunctionDFG &function) {
   }
   return true;
 }
+
+namespace {
 
 FormulaPtr preconditionOf(const FunctionDFG &function, NodeId id) {
   for (const GraphNode &graphNode : function.nodes) {

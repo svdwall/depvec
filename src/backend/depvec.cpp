@@ -2,9 +2,11 @@
 #include "depvec/verification_conditions.hpp"
 
 #include "depvec/graph_json_reader.hpp"
+#include <nlohmann/json.hpp>
 #include "smtlib_solver.hpp"
 #include "z3_smtlib_engine.hpp"
 
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -65,23 +67,67 @@ std::string formatFormula(const depvec::FormulaPtr &formula) {
   return formula ? formatFormula(*formula) : "<missing>";
 }
 
+nlohmann::json verificationJson(const depvec::VerificationResult &result) {
+  return {{"status", depvec::verificationStatusText(result.status)},
+          {"detail", result.detail}};
+}
+
+// The verification results of every function, for Graph Studio.
+nlohmann::json resultsJson(const depvec::DFG &dfg) {
+  nlohmann::json functions = nlohmann::json::array();
+  for (const auto &function : dfg.functions) {
+    nlohmann::json nodes = nlohmann::json::array();
+    for (const auto &graphNode : function.nodes) {
+      std::visit([&](const auto &node) {
+        nlohmann::json entry = verificationJson(node.verification);
+        entry["id"] = node.id;
+        nodes.push_back(std::move(entry));
+      }, graphNode);
+    }
+    nlohmann::json edges = nlohmann::json::array();
+    for (const auto &edge : function.edges) {
+      nlohmann::json checks = nlohmann::json::array();
+      for (const auto &check : edge.interferenceChecks) {
+        nlohmann::json entry = verificationJson(check.verification);
+        entry["node"] = check.node;
+        entry["predecessor"] = check.predecessor;
+        checks.push_back(std::move(entry));
+      }
+      edges.push_back({{"id", edge.id}, {"interferenceChecks", std::move(checks)}});
+    }
+    functions.push_back({{"name", function.name},
+                         {"nodesProved", depvec::allNodesProved(function)},
+                         {"nodes", std::move(nodes)},
+                         {"edges", std::move(edges)}});
+  }
+  return {{"format", "depvec-results-v1"}, {"functions", std::move(functions)}};
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::cerr << "Usage: depvec <annotated-graph.json>\n";
+  const bool json = argc == 3 && std::strcmp(argv[1], "--json") == 0;
+  if (argc != 2 && !json) {
+    std::cerr << "Usage: depvec [--json] <annotated-graph.json>\n";
     return 2;
   }
 
   try {
-    depvec::DFG dfg = depvec::readGraphFile(argv[1]);
+    depvec::DFG dfg = depvec::readGraphFile(argv[json ? 2 : 1]);
     depvec::generateWeakestPreconditions(dfg);
-    std::cout << "DFG module: " << dfg.module << '\n';
     for (auto &function : dfg.functions) {
       depvec::Z3SmtLibEngine solverEngine;
       depvec::SmtLibSolver solver(depvec::verificationSymbols(function),
                                   solverEngine);
       depvec::checkVerificationConditions(function, solver);
+    }
+    if (json) {
+      std::cout << resultsJson(dfg).dump(2) << '\n';
+      return 0;
+    }
+
+    std::cout << "DFG module: " << dfg.module << '\n';
+    for (auto &function : dfg.functions) {
 
       std::cout << "\nFunction: " << function.name << "\nLLVM IR:\n"
                 << function.ir << "\nNodes:\n";

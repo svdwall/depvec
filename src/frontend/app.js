@@ -58,6 +58,8 @@ const state = {
   layoutDoc: { format: 'depvec-layout-v1', functions: {} },
   models: [],
   drag: null,
+  // Backend results by function name, cleared whenever an assertion changes.
+  verification: null,
 };
 
 const irInput = $('#ir-file');
@@ -70,6 +72,7 @@ const functionContracts = $('#function-contracts');
 const functionGrid = $('#function-grid');
 const saveButton = $('#save-layout');
 const exportGraphButton = $('#export-graph');
+const verifyButton = $('#verify-graph');
 const themeToggle = $('#theme-toggle');
 const themeLabel = $('#theme-label');
 
@@ -154,6 +157,7 @@ layoutInput.addEventListener('change', async () => {
 
 saveButton.addEventListener('click', saveLayout);
 exportGraphButton.addEventListener('click', exportGraph);
+verifyButton.addEventListener('click', verifyGraph);
 
 loadCommandLineSession();
 
@@ -162,6 +166,8 @@ async function loadCommandLineSession() {
     const sessionResponse = await fetch('/api/session');
     if (!sessionResponse.ok) return;
     const session = await sessionResponse.json();
+    // Only the command-line launcher can run the backend.
+    verifyButton.hidden = false;
     const [irResponse, graphResponse] = await Promise.all([
       fetch('/api/ir'),
       fetch('/api/graphs'),
@@ -295,6 +301,7 @@ function refreshWorkspace() {
     emptyState.hidden = false;
     saveButton.disabled = true;
     exportGraphButton.disabled = true;
+    verifyButton.disabled = true;
     setStatus(state.irFile
       ? 'Choose the matching graph export in the header.'
       : 'Choose a graph JSON export above, or choose a matching LLVM IR and graph JSON pair.');
@@ -310,6 +317,8 @@ function refreshWorkspace() {
   emptyState.hidden = true;
   saveButton.disabled = false;
   exportGraphButton.disabled = false;
+  verifyButton.disabled = false;
+  state.verification = null;
   setStatus(state.models.length
     ? `${state.models.length} marked function${state.models.length === 1 ? '' : 's'} loaded from the graph export.`
     : 'No functions marked with the depvec annotation were found in this graph export.');
@@ -571,6 +580,7 @@ function renderFunctionContracts() {
       appendHighlightedAssertion(highlightedText, input.value, state.graphIRVariables);
       state.graphDoc[field] = input.value;
       if (field === 'precondition') state.graphPreconditionProvided = true;
+      clearVerification();
       state.models.forEach(setupOverlay);
     });
     editorControl.append(highlight, input);
@@ -738,12 +748,20 @@ function updateInspector(model) {
     detail.textContent = node?.kind === 'init'
       ? 'Click an instruction to select its init edge · Esc to leave'
       : node?.instruction || 'Function boundary';
+    const result = verificationOf(model)?.nodes.get(Number(selected.id));
+    if (result && node?.kind === 'instruction') {
+      detail.textContent += ` · node condition ${result.status}`;
+      if (result.status !== 'proved' && result.detail) detail.textContent += ` (${result.detail})`;
+    }
   } else {
     const edge = model.function.edges.find((entry) => String(entry.id) === String(selected.id));
     heading.textContent = `${edge?.kind ?? 'dependency'} hyperedge`;
     const interferences = edge?.interferences || [];
     detail.textContent = `${(edge?.sources || []).map((source) => `n${source}`).join(' + ')} → n${edge?.target ?? '?'}` +
       ` · ${interferences.length ? `interferes with ${interferences.map((node) => `n${node}`).join(', ')}` : 'no interferences'}`;
+    const failed = edge ? failedInterferenceChecks(model, edge) : [];
+    if (failed.length) detail.textContent += ` · interference fails at ${failed.map(describeCheck).join('; ')}`;
+    else if (verificationOf(model)?.nodesProved && interferences.length) detail.textContent += ' · interference proved';
   }
   copy.append(heading, detail);
   summary.append(icon, copy);
@@ -803,6 +821,7 @@ function createAssertionEditor(model, title, ariaLabel, value, save) {
     highlightedText.replaceChildren();
     appendHighlightedAssertion(highlightedText, input.value, model.irVariables);
     save(input.value);
+    clearVerification();
     updateEdgeVisibilityControl(model);
     setupOverlay(model);
   });
@@ -887,7 +906,8 @@ function isInitEdge(edge) {
 // Init edges reach every instruction, so showing all dependencies leaves them
 // out. They appear when annotated, selected, or previewed in init mode.
 function edgeIsVisible(model, edge) {
-  if (isSelected(model, 'edge', edge.id) || isInitPreview(model, edge) || edgeHasAssertion(model, edge.id))
+  if (isSelected(model, 'edge', edge.id) || isInitPreview(model, edge) ||
+      edgeHasAssertion(model, edge.id) || failedInterferenceChecks(model, edge).length)
     return true;
   return !isInitEdge(edge) && (model.showAllEdges || model.altShowAllEdges);
 }
@@ -1132,6 +1152,7 @@ function drawOverlay(model) {
     const labelFrame = document.createElement('div');
     labelFrame.className = `edge-label-frame${isSelected(model, 'edge', edge.id) ? ' selected' : ''}`;
     if (isEdgeDeemphasized(model, edge)) labelFrame.classList.add('muted');
+    if (failedInterferenceChecks(model, edge).length) labelFrame.classList.add('vc-failed');
     labelFrame.dataset.edgeId = String(edge.id);
     labelFrame.setAttribute('role', 'group');
     labelFrame.setAttribute('aria-label', `Select or move the ${edge.kind} dependency label along its edge`);
@@ -1261,7 +1282,8 @@ function addEdgePath(model, edge, d, color) {
   model.svg.append(hit);
   const visible = svgElement('path', {
     d,
-    class: `edge-visible${isSelected(model, 'edge', edge.id) ? ' selected' : ''}${muted ? ' muted' : ''}`,
+    class: `edge-visible${isSelected(model, 'edge', edge.id) ? ' selected' : ''}${muted ? ' muted' : ''}` +
+      `${failedInterferenceChecks(model, edge).length ? ' vc-failed' : ''}`,
     stroke: color,
     fill: color,
   });
@@ -1334,10 +1356,22 @@ function setInitPreview(model, edgeId) {
 
 // Marks the selected instruction, or the instructions that interfere with the
 // selected or previewed dependency. An init edge also marks its target.
+// Verification results mark failed node conditions, and for a selected
+// dependency, the instructions whose interference check failed.
 function updateLineHighlights(model) {
   const selected = model.selected;
   model.card?.classList.toggle('init-armed', initModeArmed(model));
-  model.lineNodes.forEach((line) => line.classList.remove('selected', 'interferes'));
+  model.lineNodes.forEach((line) => {
+    line.classList.remove('selected', 'interferes', 'vc-failed', 'interference-failed');
+    line.removeAttribute('title');
+  });
+  for (const node of model.function.nodes) {
+    if (!nodeVcFailed(model, node.id)) continue;
+    const line = model.lineNodes.get(model.nodeLines.get(Number(node.id)));
+    const result = verificationOf(model).nodes.get(Number(node.id));
+    line?.classList.add('vc-failed');
+    line?.setAttribute('title', `Node condition ${result.status}${result.detail ? `: ${result.detail}` : ''}`);
+  }
   const edgeId = model.initPreview ?? (selected?.type === 'edge' ? selected.id : null);
   if (selected?.type === 'node' && edgeId === null) {
     const line = model.nodeLines.get(Number(selected.id));
@@ -1349,6 +1383,11 @@ function updateLineHighlights(model) {
     for (const nodeId of edge?.interferences || []) {
       const line = model.nodeLines.get(Number(nodeId));
       model.lineNodes.get(line)?.classList.add('interferes');
+    }
+    for (const check of edge ? failedInterferenceChecks(model, edge) : []) {
+      const line = model.lineNodes.get(model.nodeLines.get(Number(check.node)));
+      line?.classList.add('interference-failed');
+      line?.setAttribute('title', `Interference ${describeCheck(check)}`);
     }
   }
 }
@@ -1413,9 +1452,8 @@ function saveLayout() {
   setStatus('Saved editable labels and their positions along the edge tracks.');
 }
 
-function exportGraph() {
-  if (!state.graphDoc) return;
-
+// The graph document with the current edge assertions.
+function currentGraphDocument() {
   const graph = JSON.parse(JSON.stringify(state.graphDoc));
   graph.precondition ??= '';
   graph.postcondition ??= '';
@@ -1435,7 +1473,12 @@ function exportGraph() {
       if (!Array.isArray(edge.interferences)) edge.interferences = [];
     }
   }
+  return graph;
+}
 
+function exportGraph() {
+  if (!state.graphDoc) return;
+  const graph = currentGraphDocument();
   const blob = new Blob([`${JSON.stringify(graph, null, 2)}\n`], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -1446,4 +1489,85 @@ function exportGraph() {
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   setStatus('Exported the graph with the current edge assertions.');
+}
+
+async function verifyGraph() {
+  if (!state.graphDoc) return;
+  verifyButton.disabled = true;
+  setStatus('Verifying with the backend…');
+  try {
+    const response = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentGraphDocument()),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.format !== 'depvec-results-v1') {
+      throw new Error(result.error || `The backend request failed (${response.status}).`);
+    }
+    state.verification = new Map(result.functions.map((fn) => [fn.name, {
+      nodesProved: fn.nodesProved,
+      nodes: new Map(fn.nodes.map((node) => [Number(node.id), node])),
+      edges: new Map(fn.edges.map((edge) => [String(edge.id), edge.interferenceChecks])),
+    }]));
+    setStatus(verificationSummary());
+  } catch (error) {
+    state.verification = null;
+    setStatus(`Verification failed: ${error.message}`, true);
+  } finally {
+    verifyButton.disabled = !state.graphDoc;
+    refreshVerificationMarks();
+  }
+}
+
+function clearVerification() {
+  if (!state.verification) return;
+  state.verification = null;
+  setStatus('Assertions changed. Verify again to update the results.');
+  refreshVerificationMarks();
+}
+
+function refreshVerificationMarks() {
+  for (const model of state.models) {
+    updateLineHighlights(model);
+    updateInspector(model);
+    updateEdgeVisibilityControl(model);
+    setupOverlay(model);
+  }
+}
+
+function verificationSummary() {
+  const parts = state.models.map((model) => {
+    const name = `@${model.function.name}`;
+    const failedNodes = model.function.nodes.filter((node) => nodeVcFailed(model, node.id)).length;
+    if (failedNodes) return `${name}: ${failedNodes} node condition${failedNodes === 1 ? '' : 's'} failed`;
+    const failedEdges = model.function.edges.filter((edge) => failedInterferenceChecks(model, edge).length).length;
+    if (failedEdges) return `${name}: ${failedEdges} dependenc${failedEdges === 1 ? 'y' : 'ies'} with failed interference checks`;
+    return `${name}: all proved`;
+  });
+  return `Verified. ${parts.join('; ')}.`;
+}
+
+function verificationOf(model) {
+  return state.verification?.get(model.function.name) ?? null;
+}
+
+// Instruction nodes, branches included, must be proved; init and exit nodes
+// have no verification condition.
+function nodeVcFailed(model, nodeId) {
+  const result = verificationOf(model)?.nodes.get(Number(nodeId));
+  const node = model.function.nodes.find((entry) => Number(entry.id) === Number(nodeId));
+  return Boolean(result) && node?.kind === 'instruction' && result.status !== 'proved';
+}
+
+// The backend checks interference only once every node is proved.
+function failedInterferenceChecks(model, edge) {
+  const verification = verificationOf(model);
+  if (!verification?.nodesProved) return [];
+  return (verification.edges.get(String(edge.id)) || []).filter((check) => check.status !== 'proved');
+}
+
+function describeCheck(check) {
+  const path = check.predecessor ? ` on the path from ${check.predecessor}` : '';
+  return `n${check.node}${path}: ${check.status}${check.detail ? ` (${check.detail})` : ''}`;
 }

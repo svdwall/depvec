@@ -64,6 +64,7 @@ local port.
 - Select a dependency to edit its assertion in the editor below the graph (default: empty); drag its HTML frame vertically along the edge track. Focus the frame and use the up/down arrow keys to nudge it.
 - A data dependency into a `phi` has one assertion per incoming predecessor, because each path brings its value from a different source. Selecting it shows one editor per predecessor, and its label lists each non-empty assertion with its predecessor.
 - Assertions name the members of a `cmpxchg` result as `%r[0]` (the old value) and `%r[1]` (the success flag).
+- When launched with `scripts/depvec-studio`, **Verify** runs the backend (`build/backend/depvec --json`, or `DEPVEC_BACKEND`) on the graph with the current assertions. Z3 must be on `PATH`, for example inside `nix develop`. A failed node condition gets a wavy red underline. Once every node condition in a function is proved, dependencies whose interference checks fail are drawn dashed with a red label; selecting one outlines the instructions whose check failed. Editing an assertion clears the results.
 - Choose **Save edits** to download a `.depvec-layout.json` file.
 - Use **Open edits** to restore those labels and positions along their edge tracks later.
 - Choose **Export graph** to download a v2 graph JSON with the current edge assertions written into each edge's `assertion` field. Empty labels are exported as empty assertions, which the backend treats as `true`.
