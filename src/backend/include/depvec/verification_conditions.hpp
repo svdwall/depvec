@@ -6,12 +6,15 @@
 
 namespace depvec {
 
-// Gather the symbols referenced by a function's preconditions and computed
-// weakest preconditions. The resulting set is fixed for one solver instance.
+// Gather the symbols referenced by a function's preconditions, computed
+// weakest preconditions, and interference checks. The resulting set is fixed
+// for one solver instance.
 SolverSymbols verificationSymbols(const FunctionDFG &function);
 
 // Check each node's precondition && !weakest_precondition. Nodes missing either
-// formula remain NotChecked and record why no query could be issued.
+// formula remain NotChecked and record why no query could be issued. Once every
+// instruction and branch node is proved, also check each interference:
+// assertion && node precondition && !weakest_precondition.
 void checkVerificationConditions(FunctionDFG &function, Solver &solver);
 
 const char *verificationStatusText(VerificationStatus status);

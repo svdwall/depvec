@@ -7,6 +7,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace depvec {
 namespace {
@@ -368,6 +369,56 @@ void computeInto(Node &node, Compute compute) {
   }
 }
 
+// The weakest precondition of an interfering node for an edge assertion. Both
+// arms of a branch keep the assertion.
+FormulaPtr interferenceWeakestPrecondition(const FunctionDFG &function,
+                                           const GraphNode &graphNode,
+                                           const Formula &assertion) {
+  if (const auto *branchNode = std::get_if<BranchNode>(&graphNode))
+    return weakestPreconditionOfBranch(branchNode->instruction, assertion,
+                                       assertion);
+  const auto *instructionNode = std::get_if<InstructionNode>(&graphNode);
+  if (!instructionNode)
+    throw std::invalid_argument("an interfering node must be an instruction");
+  if (const auto *phi =
+          std::get_if<PhiInstruction>(&instructionNode->instruction.node))
+    return weakestPreconditionOfPhi(
+        *phi, incomingAssertionsOf(function, instructionNode->id), assertion);
+  return weakestPrecondition(instructionNode->instruction, assertion);
+}
+
+// One check per edge assertion and interfering node. A phi edge's assertions
+// are its incoming ones.
+void generateInterferenceChecks(FunctionDFG &function) {
+  for (DependencyEdge &edge : function.edges) {
+    edge.interferenceChecks.clear();
+    std::vector<std::pair<std::string, FormulaPtr>> assertions;
+    if (edge.incomingAssertions.empty())
+      assertions.emplace_back(std::string(), edge.assertion);
+    for (const IncomingAssertion &path : edge.incomingAssertions)
+      assertions.emplace_back(path.predecessor, path.assertion);
+
+    for (const auto &[predecessor, assertion] : assertions) {
+      for (NodeId interferer : edge.interferences) {
+        InterferenceCheck check{interferer, predecessor, assertion, {}, {}, {}};
+        const auto node = std::find_if(
+            function.nodes.begin(), function.nodes.end(),
+            [&](const GraphNode &candidate) {
+              return std::visit([](const auto &data) { return data.id; },
+                                candidate) == interferer;
+            });
+        if (node == function.nodes.end() || assertion.get() == nullptr)
+          check.weakest_precondition_status = "interfering node or assertion is missing";
+        else
+          computeInto(check, [&] {
+            return interferenceWeakestPrecondition(function, *node, *assertion);
+          });
+        edge.interferenceChecks.push_back(std::move(check));
+      }
+    }
+  }
+}
+
 } // namespace
 
 void generateWeakestPreconditions(DFG &dfg) {
@@ -414,6 +465,7 @@ void generateWeakestPreconditions(DFG &dfg) {
         });
       }
     }
+    generateInterferenceChecks(function);
   }
 }
 

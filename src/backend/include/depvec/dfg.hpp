@@ -87,8 +87,23 @@ struct IncomingAssertion {
   FormulaPtr assertion;
 };
 
+// Whether an interfering node preserves an edge assertion: the violation is
+// assertion && node precondition && !weakest_precondition, where the weakest
+// precondition is the node's for the assertion as its postcondition. A phi
+// edge has one check per incoming assertion, named by predecessor; other
+// edges leave predecessor empty.
+struct InterferenceCheck {
+  NodeId node;
+  std::string predecessor;
+  FormulaPtr assertion;
+  FormulaPtr weakest_precondition;
+  std::string weakest_precondition_status;
+  VerificationResult verification;
+};
+
 // A data edge into a phi carries one incoming assertion per predecessor, and
 // its assertion is true. All other edges have no incoming assertions.
+// interferenceChecks is filled by generateWeakestPreconditions.
 struct DependencyEdge {
   std::string id;
   std::vector<NodeId> sources;
@@ -98,6 +113,7 @@ struct DependencyEdge {
   FormulaPtr assertion;
   std::vector<IncomingAssertion> incomingAssertions;
   std::vector<NodeId> interferences;
+  std::vector<InterferenceCheck> interferenceChecks;
 };
 
 inline constexpr const char *TrueBranchValue = "true-branch";

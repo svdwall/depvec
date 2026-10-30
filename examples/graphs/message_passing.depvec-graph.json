@@ -125,7 +125,7 @@
           ]
         },
         {
-          "assertion": "%cmp = false -> %0 = 1",
+          "assertion": "%cmp = false -> %0 != 0",
           "id": "e1",
           "interferences": [
             1,
@@ -156,7 +156,7 @@
           ]
         },
         {
-          "assertion": "%0 = 1 -> @shared_value |-> 42",
+          "assertion": "%0 != 0 -> @shared_value |-> 42",
           "id": "e3",
           "interferences": [
             1,
@@ -171,7 +171,7 @@
           "values": []
         },
         {
-          "assertion": "%0 = 1",
+          "assertion": "%0 != 0",
           "id": "e4",
           "interferences": [
             1
@@ -218,7 +218,7 @@
           "values": []
         },
         {
-          "assertion": "@ready |-> 1 -> @shared_value |-> 42",
+          "assertion": "!(@ready |-> 0) -> @shared_value |-> 42",
           "id": "e7",
           "interferences": [
             1,

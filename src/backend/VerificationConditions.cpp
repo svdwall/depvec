@@ -70,6 +70,41 @@ void collectNodeSymbols(const Node &node, SymbolMaps &symbols) {
     collectFormulaSymbols(*node.weakest_precondition, symbols);
 }
 
+void collectInterferenceSymbols(const DependencyEdge &edge, SymbolMaps &symbols) {
+  for (const InterferenceCheck &check : edge.interferenceChecks) {
+    if (check.assertion)
+      collectFormulaSymbols(*check.assertion, symbols);
+    if (check.weakest_precondition)
+      collectFormulaSymbols(*check.weakest_precondition, symbols);
+  }
+}
+
+// Proved when the violation condition is unsatisfiable.
+VerificationResult checkViolation(const Formula &violation, Solver &solver) {
+  VerificationResult verification;
+  try {
+    const SolverResult result = solver.check(violation);
+    switch (result.status) {
+    case SolverStatus::Unsat:
+      verification.status = VerificationStatus::Proved;
+      verification.detail = "violation condition is unsatisfiable";
+      break;
+    case SolverStatus::Sat:
+      verification.status = VerificationStatus::Counterexample;
+      verification.detail = "violation condition is satisfiable";
+      break;
+    case SolverStatus::Unknown:
+      verification.status = VerificationStatus::Unknown;
+      verification.detail = result.reason;
+      break;
+    }
+  } catch (const std::exception &error) {
+    verification.status = VerificationStatus::Error;
+    verification.detail = error.what();
+  }
+  return verification;
+}
+
 template <typename Node>
 void checkNode(Node &node, Solver &solver) {
   node.verification = {};
@@ -84,27 +119,61 @@ void checkNode(Node &node, Solver &solver) {
     return;
   }
 
-  try {
-    const Formula violation = *node.precondition && !*node.weakest_precondition;
-    const SolverResult result = solver.check(violation);
-    switch (result.status) {
-    case SolverStatus::Unsat:
-      node.verification.status = VerificationStatus::Proved;
-      node.verification.detail = "violation condition is unsatisfiable";
-      break;
-    case SolverStatus::Sat:
-      node.verification.status = VerificationStatus::Counterexample;
-      node.verification.detail = "violation condition is satisfiable";
-      break;
-    case SolverStatus::Unknown:
-      node.verification.status = VerificationStatus::Unknown;
-      node.verification.detail = result.reason;
-      break;
-    }
-  } catch (const std::exception &error) {
-    node.verification.status = VerificationStatus::Error;
-    node.verification.detail = error.what();
+  node.verification = checkViolation(
+      *node.precondition && !*node.weakest_precondition, solver);
+}
+
+// Instruction and branch nodes must be proved; init and exit nodes have no
+// verification condition.
+bool allNodesProved(const FunctionDFG &function) {
+  for (const GraphNode &graphNode : function.nodes) {
+    const bool proved = std::visit([](const auto &node) {
+      using Node = std::decay_t<decltype(node)>;
+      if constexpr (std::is_same_v<Node, InstructionNode> ||
+                    std::is_same_v<Node, BranchNode>)
+        return node.verification.status == VerificationStatus::Proved;
+      else
+        return true;
+    }, graphNode);
+    if (!proved)
+      return false;
   }
+  return true;
+}
+
+FormulaPtr preconditionOf(const FunctionDFG &function, NodeId id) {
+  for (const GraphNode &graphNode : function.nodes) {
+    FormulaPtr precondition;
+    const bool found = std::visit([&](const auto &node) {
+      if (node.id != id)
+        return false;
+      precondition = node.precondition;
+      return true;
+    }, graphNode);
+    if (found)
+      return precondition;
+  }
+  return {};
+}
+
+// The interfering node runs while the assertion holds and its own
+// precondition holds, so it must preserve the assertion.
+void checkInterference(const FunctionDFG &function, InterferenceCheck &check,
+                       Solver &solver) {
+  check.verification = {};
+  const FormulaPtr precondition = preconditionOf(function, check.node);
+  if (!static_cast<bool>(precondition) || !static_cast<bool>(check.assertion)) {
+    check.verification.detail = "assertion or node precondition is missing";
+    return;
+  }
+  if (!static_cast<bool>(check.weakest_precondition)) {
+    check.verification.detail = check.weakest_precondition_status.empty()
+                                    ? "weakest precondition is missing"
+                                    : check.weakest_precondition_status;
+    return;
+  }
+  check.verification = checkViolation(
+      *check.assertion && *precondition && !*check.weakest_precondition, solver);
 }
 
 } // namespace
@@ -114,6 +183,8 @@ SolverSymbols verificationSymbols(const FunctionDFG &function) {
   for (const GraphNode &graphNode : function.nodes)
     std::visit([&](const auto &node) { collectNodeSymbols(node, maps); },
                graphNode);
+  for (const DependencyEdge &edge : function.edges)
+    collectInterferenceSymbols(edge, maps);
 
   SolverSymbols symbols;
   for (auto &[key, value] : maps.variables) {
@@ -134,6 +205,20 @@ SolverSymbols verificationSymbols(const FunctionDFG &function) {
 void checkVerificationConditions(FunctionDFG &function, Solver &solver) {
   for (GraphNode &graphNode : function.nodes)
     std::visit([&](auto &node) { checkNode(node, solver); }, graphNode);
+
+  // Edge assertions are only established once every node is proved, so the
+  // interference checks, which assume them, wait for that.
+  const bool nodesProved = allNodesProved(function);
+  for (DependencyEdge &edge : function.edges) {
+    for (InterferenceCheck &check : edge.interferenceChecks) {
+      if (nodesProved) {
+        checkInterference(function, check, solver);
+      } else {
+        check.verification = {};
+        check.verification.detail = "not every node verification condition is proved";
+      }
+    }
+  }
 }
 
 const char *verificationStatusText(VerificationStatus status) {

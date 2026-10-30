@@ -25,6 +25,8 @@ FormulaPtr weakestPreconditionOfPhi(
     const PhiInstruction &phi, const std::vector<IncomingAssertion> &incoming,
     const Formula &postcondition);
 
+// Compute every node's weakest precondition, and for each edge assertion and
+// interfering node, the node's weakest precondition for that assertion.
 void generateWeakestPreconditions(DFG &dfg);
 
 } // namespace depvec

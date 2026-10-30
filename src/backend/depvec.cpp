@@ -142,6 +142,16 @@ int main(int argc, char **argv) {
         for (const auto &path : edge.incomingAssertions)
           std::cout << "    from " << path.predecessor << " (n" << path.source
                     << "): " << formatFormula(path.assertion) << '\n';
+        for (const auto &check : edge.interferenceChecks) {
+          std::cout << "    interference n" << check.node;
+          if (!check.predecessor.empty())
+            std::cout << " on the path from " << check.predecessor;
+          std::cout << ": "
+                    << depvec::verificationStatusText(check.verification.status);
+          if (!check.verification.detail.empty())
+            std::cout << " (" << check.verification.detail << ')';
+          std::cout << '\n';
+        }
       }
     }
   } catch (const std::exception &error) {
